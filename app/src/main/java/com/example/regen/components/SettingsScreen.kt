@@ -19,7 +19,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.clickable // ADD THIS IMPORT
+import androidx.compose.foundation.clickable
 
 // ---------- COLOR PALETTE ----------
 private val YellowPrimary = Color(0xFFFFC107)
@@ -28,7 +28,10 @@ private val LightGrayBackground = Color(0xFFF5F5F5)
 
 // ---------- SETTINGS SCREEN ----------
 @Composable
-fun SettingsScreen(onBackClick: () -> Unit = {}) {
+fun SettingsScreen(
+    onBackClick: () -> Unit = {},
+    onLogout: () -> Unit = {}
+) {
     var currentScreen by remember { mutableStateOf("main") }
 
     when (currentScreen) {
@@ -41,7 +44,8 @@ fun SettingsScreen(onBackClick: () -> Unit = {}) {
             onPaymentMethodsClick = { currentScreen = "payment" },
             onLanguageClick = { currentScreen = "language" },
             onHelpSupportClick = { currentScreen = "help" },
-            onAboutClick = { currentScreen = "about" }
+            onAboutClick = { currentScreen = "about" },
+            onLogout = onLogout
         )
         "account" -> AccountSettingsScreen(onBackClick = { currentScreen = "main" })
         "notifications" -> NotificationsSettingsScreen(onBackClick = { currentScreen = "main" })
@@ -64,7 +68,8 @@ fun MainSettingsScreen(
     onPaymentMethodsClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
     onHelpSupportClick: () -> Unit = {},
-    onAboutClick: () -> Unit = {}
+    onAboutClick: () -> Unit = {},
+    onLogout: () -> Unit = {}
 ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -154,7 +159,7 @@ fun MainSettingsScreen(
 
             // Logout Button
             Button(
-                onClick = { /* TODO: Add logout action */ },
+                onClick = onLogout,
                 colors = ButtonDefaults.buttonColors(
                     backgroundColor = Color.Red,
                     contentColor = Color.White
@@ -789,7 +794,7 @@ fun SettingsOption(text: String, icon: androidx.compose.ui.graphics.vector.Image
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
-                .clickable(onClick = onClick), // FIXED: Added clickable import
+                .clickable(onClick = onClick),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -905,7 +910,7 @@ fun LanguageOption(language: String, selected: Boolean, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp)
-            .clickable(onClick = onClick) // FIXED: Added clickable import
+            .clickable(onClick = onClick)
     ) {
         Row(
             modifier = Modifier
@@ -939,7 +944,7 @@ fun HelpOption(title: String, description: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp)
-            .clickable { /* TODO: Navigate to help section */ } // FIXED: Added clickable import
+            .clickable { /* TODO: Navigate to help section */ }
     ) {
         Row(
             modifier = Modifier
@@ -980,7 +985,7 @@ fun AboutItem(title: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp)
-            .clickable { /* TODO: Handle click */ } // FIXED: Added clickable import
+            .clickable { /* TODO: Handle click */ }
     ) {
         Row(
             modifier = Modifier

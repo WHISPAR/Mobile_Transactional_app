@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -15,6 +16,7 @@ import com.example.regen.components.BudgetScreen
 import com.example.regen.components.HomeScreen
 import com.example.regen.components.SettingsScreen
 import com.example.regen.components.WalletScreen
+import com.example.regen.components.SigninScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,8 +40,17 @@ fun Navigation() {
 
     NavHost(
         navController = navController,
-        startDestination = "home"
+        startDestination = "signin"
     ) {
+        composable("signin") {
+            SigninScreen(
+                onSignInSuccess = {
+                    navController.navigate("home") {
+                        popUpTo("signin") { inclusive = true }
+                    }
+                }
+            )
+        }
         composable("home") {
             HomeScreen(
                 onWalletClick = { navController.navigate("wallet") },
@@ -54,7 +65,15 @@ fun Navigation() {
             BudgetScreen(onBackClick = { navController.popBackStack() })
         }
         composable("settings") {
-            SettingsScreen(onBackClick = { navController.popBackStack() })
+            SettingsScreen(
+                onBackClick = { navController.popBackStack() },
+                onLogout = {
+                    // Navigate back to signin screen and clear back stack
+                    navController.navigate("signin") {
+                        popUpTo("home") { inclusive = true }
+                    }
+                }
+            )
         }
     }
 }

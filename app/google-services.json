@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "487539903009",
+    "project_id": "regen-wallet",
+    "storage_bucket": "regen-wallet.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:487539903009:android:58a4f291ecaa51fa757160",
+        "android_client_info": {
+          "package_name": "com.example.regen"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB51sCZq9JFukk--MV2KVhTMNWC1f4JimM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:487539903009:android:17363e36e53335f8757160",
+        "android_client_info": {
+          "package_name": "com.transaction.regen"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB51sCZq9JFukk--MV2KVhTMNWC1f4JimM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

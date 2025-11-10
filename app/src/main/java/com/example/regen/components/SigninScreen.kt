@@ -19,11 +19,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.regen.services.AuthService
+import kotlinx.coroutines.launch
 
 // Color palette from BudgetScreen
 private val YellowPrimary = Color(0xFFFFC107)
 private val LightGrayBackground = Color(0xFFF5F5F5)
 private val DarkerGrayText = Color(0xFF757575)
+private val ErrorRed = Color(0xFFD32F2F)
 
 @Composable
 fun SigninScreen(
@@ -37,6 +40,10 @@ fun SigninScreen(
     var name by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val coroutineScope = rememberCoroutineScope()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -66,11 +73,26 @@ fun SigninScreen(
                 modifier = Modifier.padding(bottom = 32.dp)
             )
 
+            // Error message
+            errorMessage?.let { message ->
+                Text(
+                    text = message,
+                    color = ErrorRed,
+                    style = MaterialTheme.typography.body2,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp)
+                )
+            }
+
             // Name Field (only for sign up)
             if (!isSignIn) {
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = {
+                        name = it
+                        errorMessage = null // Clear error when user types
+                    },
                     label = { Text("Full Name", color = DarkerGrayText) },
                     leadingIcon = {
                         Icon(Icons.Default.Person, contentDescription = "Name", tint = DarkerGrayText)
@@ -91,7 +113,10 @@ fun SigninScreen(
             // Email Field
             OutlinedTextField(
                 value = email,
-                onValueChange = { email = it },
+                onValueChange = {
+                    email = it
+                    errorMessage = null // Clear error when user types
+                },
                 label = { Text("Email Address", color = DarkerGrayText) },
                 leadingIcon = {
                     Icon(Icons.Default.Email, contentDescription = "Email", tint = DarkerGrayText)
@@ -112,7 +137,10 @@ fun SigninScreen(
             // Password Field
             OutlinedTextField(
                 value = password,
-                onValueChange = { password = it },
+                onValueChange = {
+                    password = it
+                    errorMessage = null // Clear error when user types
+                },
                 label = { Text("Password", color = DarkerGrayText) },
                 leadingIcon = {
                     Icon(Icons.Default.Lock, contentDescription = "Password", tint = DarkerGrayText)
@@ -144,7 +172,10 @@ fun SigninScreen(
             if (!isSignIn) {
                 OutlinedTextField(
                     value = confirmPassword,
-                    onValueChange = { confirmPassword = it },
+                    onValueChange = {
+                        confirmPassword = it
+                        errorMessage = null // Clear error when user types
+                    },
                     label = { Text("Confirm Password", color = DarkerGrayText) },
                     leadingIcon = {
                         Icon(Icons.Default.Lock, contentDescription = "Confirm Password", tint = DarkerGrayText)
@@ -176,26 +207,47 @@ fun SigninScreen(
             // Sign In/Sign Up Button
             Button(
                 onClick = {
-                    // Handle authentication logic here
-                    if (isSignIn) {
-                        // Sign in logic
-                        if (email.isNotEmpty() && password.isNotEmpty()) {
-                            onSignInSuccess()
-                        }
-                    } else {
-                        // Sign up logic
-                        if (name.isNotEmpty() && email.isNotEmpty() && password.isNotEmpty() && password == confirmPassword) {
-                            onSignInSuccess()
+                    // Validate inputs
+                    if (!isSignIn && password != confirmPassword) {
+                        errorMessage = "Passwords do not match"
+                        return@Button
+                    }
+
+                    if (!isSignIn && password.length < 6) {
+                        errorMessage = "Password must be at least 6 characters"
+                        return@Button
+                    }
+
+                    isLoading = true
+                    errorMessage = null
+
+                    coroutineScope.launch {
+                        try {
+                            val result = if (isSignIn) {
+                                AuthService.signIn(email, password)
+                            } else {
+                                AuthService.signUp(name, email, password)
+                            }
+
+                            if (result.isSuccess) {
+                                onSignInSuccess()
+                            } else {
+                                errorMessage = result.exceptionOrNull()?.message ?: "Authentication failed"
+                            }
+                        } catch (e: Exception) {
+                            errorMessage = e.message ?: "An error occurred"
+                        } finally {
+                            isLoading = false
                         }
                     }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
-                enabled = if (isSignIn) {
+                enabled = !isLoading && if (isSignIn) {
                     email.isNotEmpty() && password.isNotEmpty()
                 } else {
-                    name.isNotEmpty() && email.isNotEmpty() && password.isNotEmpty() && password == confirmPassword
+                    name.isNotEmpty() && email.isNotEmpty() && password.isNotEmpty() && confirmPassword.isNotEmpty()
                 },
                 colors = ButtonDefaults.buttonColors(
                     backgroundColor = YellowPrimary,
@@ -205,11 +257,19 @@ fun SigninScreen(
                 ),
                 shape = MaterialTheme.shapes.medium
             ) {
-                Text(
-                    text = if (isSignIn) "Sign In" else "Create Account",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.Black,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        text = if (isSignIn) "Sign In" else "Create Account",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -226,7 +286,10 @@ fun SigninScreen(
                     fontSize = 14.sp
                 )
                 TextButton(
-                    onClick = { isSignIn = !isSignIn },
+                    onClick = {
+                        isSignIn = !isSignIn
+                        errorMessage = null // Clear error when switching modes
+                    },
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = YellowPrimary
                     )
@@ -255,10 +318,4 @@ fun SigninScreen(
             }
         }
     }
-}
-
-// Authentication state management
-class AuthState {
-    var isAuthenticated by mutableStateOf(false)
-    var currentUser by mutableStateOf<String?>(null)
 }

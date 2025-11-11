@@ -21,6 +21,16 @@ object AuthService {
         phone: String = ""
     ): Result<Boolean> {
         return try {
+            // Validate inputs
+            if (name.isBlank() || email.isBlank() || password.isBlank()) {
+                return Result.failure(Exception("Please fill in all fields"))
+            }
+
+            if (password.length < 6) {
+                return Result.failure(Exception("Password must be at least 6 characters"))
+            }
+
+            // Create user in Firebase Auth
             val result = auth.createUserWithEmailAndPassword(email, password).await()
 
             // Update user profile with name
@@ -31,6 +41,7 @@ object AuthService {
 
             // Create user document in Firestore
             val userData = hashMapOf(
+                "uid" to result.user!!.uid,
                 "name" to name,
                 "email" to email,
                 "phone" to phone,
@@ -47,19 +58,44 @@ object AuthService {
             isAuthenticated.value = true
             Result.success(true)
         } catch (e: Exception) {
-            Result.failure(e)
+            // Handle specific Firebase errors
+            val errorMessage = when {
+                e.message?.contains("email address is already in use") == true ->
+                    "This email is already registered. Please sign in instead."
+                e.message?.contains("invalid email") == true ->
+                    "Please enter a valid email address."
+                e.message?.contains("network error") == true ->
+                    "Network error. Please check your internet connection."
+                else -> e.message ?: "Failed to create account. Please try again."
+            }
+            Result.failure(Exception(errorMessage))
         }
     }
 
     // Sign in with email and password
     suspend fun signIn(email: String, password: String): Result<Boolean> {
         return try {
+            // Validate inputs
+            if (email.isBlank() || password.isBlank()) {
+                return Result.failure(Exception("Please enter email and password"))
+            }
+
             val result = auth.signInWithEmailAndPassword(email, password).await()
             currentUser.value = result.user
             isAuthenticated.value = true
             Result.success(true)
         } catch (e: Exception) {
-            Result.failure(e)
+            // Handle specific Firebase errors
+            val errorMessage = when {
+                e.message?.contains("invalid credential") == true ->
+                    "Invalid email or password. Please try again."
+                e.message?.contains("user not found") == true ->
+                    "No account found with this email. Please sign up first."
+                e.message?.contains("network error") == true ->
+                    "Network error. Please check your internet connection."
+                else -> e.message ?: "Failed to sign in. Please try again."
+            }
+            Result.failure(Exception(errorMessage))
         }
     }
 
@@ -78,10 +114,24 @@ object AuthService {
     // Reset password
     suspend fun resetPassword(email: String): Result<Boolean> {
         return try {
+            if (email.isBlank()) {
+                return Result.failure(Exception("Please enter your email address"))
+            }
             auth.sendPasswordResetEmail(email).await()
             Result.success(true)
         } catch (e: Exception) {
-            Result.failure(e)
+            val errorMessage = when {
+                e.message?.contains("user not found") == true ->
+                    "No account found with this email address."
+                else -> e.message ?: "Failed to send reset email. Please try again."
+            }
+            Result.failure(Exception(errorMessage))
         }
+    }
+
+    // Check if user is logged in
+    fun checkAuthState() {
+        currentUser.value = auth.currentUser
+        isAuthenticated.value = auth.currentUser != null
     }
 }

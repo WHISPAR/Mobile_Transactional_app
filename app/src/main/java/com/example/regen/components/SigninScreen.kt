@@ -28,6 +28,10 @@ private val LightGrayBackground = Color(0xFFF5F5F5)
 private val DarkerGrayText = Color(0xFF757575)
 private val ErrorRed = Color(0xFFD32F2F)
 
+// Default admin credentials
+private const val DEFAULT_ADMIN_EMAIL = "admin@regen.com"
+private const val DEFAULT_ADMIN_PASSWORD = "admin123"
+
 @Composable
 fun SigninScreen(
     onSignInSuccess: () -> Unit,
@@ -44,6 +48,52 @@ fun SigninScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val coroutineScope = rememberCoroutineScope()
+
+    // Function to handle authentication
+    fun handleAuthentication() {
+        // Validate inputs
+        if (!isSignIn) {
+            if (password != confirmPassword) {
+                errorMessage = "Passwords do not match"
+                return
+            }
+            if (password.length < 6) {
+                errorMessage = "Password must be at least 6 characters"
+                return
+            }
+        }
+
+        isLoading = true
+        errorMessage = null
+
+        coroutineScope.launch {
+            try {
+                // Check for default admin login first
+                if (isSignIn && email == DEFAULT_ADMIN_EMAIL && password == DEFAULT_ADMIN_PASSWORD) {
+                    // Simulate successful admin login
+                    onSignInSuccess()
+                    return@launch
+                }
+
+                // Regular authentication flow
+                val result = if (isSignIn) {
+                    AuthService.signIn(email, password)
+                } else {
+                    AuthService.signUp(name, email, password)
+                }
+
+                if (result.isSuccess) {
+                    onSignInSuccess()
+                } else {
+                    errorMessage = result.exceptionOrNull()?.message ?: "Authentication failed"
+                }
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "An error occurred"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -206,41 +256,7 @@ fun SigninScreen(
 
             // Sign In/Sign Up Button
             Button(
-                onClick = {
-                    // Validate inputs
-                    if (!isSignIn && password != confirmPassword) {
-                        errorMessage = "Passwords do not match"
-                        return@Button
-                    }
-
-                    if (!isSignIn && password.length < 6) {
-                        errorMessage = "Password must be at least 6 characters"
-                        return@Button
-                    }
-
-                    isLoading = true
-                    errorMessage = null
-
-                    coroutineScope.launch {
-                        try {
-                            val result = if (isSignIn) {
-                                AuthService.signIn(email, password)
-                            } else {
-                                AuthService.signUp(name, email, password)
-                            }
-
-                            if (result.isSuccess) {
-                                onSignInSuccess()
-                            } else {
-                                errorMessage = result.exceptionOrNull()?.message ?: "Authentication failed"
-                            }
-                        } catch (e: Exception) {
-                            errorMessage = e.message ?: "An error occurred"
-                        } finally {
-                            isLoading = false
-                        }
-                    }
-                },
+                onClick = { handleAuthentication() },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),

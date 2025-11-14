@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -135,6 +136,26 @@ object UserManager {
             true
         } catch (e: Exception) {
             false
+        }
+    }
+
+    // ADD THIS MISSING FUNCTION
+    suspend fun getRecentTransactions(userId: String, limit: Int): List<Transaction> {
+        return try {
+            val querySnapshot = db.collection("users")
+                .document(userId)
+                .collection("transactions")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(limit.toLong())
+                .get()
+                .await()
+
+            querySnapshot.documents.mapNotNull { document ->
+                document.toObject(Transaction::class.java)
+            }
+        } catch (e: Exception) {
+            // Return empty list if there's an error or no transactions
+            emptyList()
         }
     }
 

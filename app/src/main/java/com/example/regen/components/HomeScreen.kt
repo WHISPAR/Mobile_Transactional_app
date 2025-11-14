@@ -16,11 +16,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.regen.managers.UserManager
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 
 // ---------- COLOR PALETTE ----------
 private val YellowPrimary = Color(0xFFFFC107)
@@ -131,6 +134,16 @@ fun MainHomeScreen(
     onWithdrawClick: () -> Unit = {},
     onReportsClick: () -> Unit = {}
 ) {
+    var recentTransactions by remember { mutableStateOf<List<UserManager.Transaction>>(emptyList()) }
+    val userId = UserManager.getCurrentUserId()
+
+    // Load recent transactions
+    LaunchedEffect(userId) {
+        if (userId != null) {
+            recentTransactions = UserManager.getRecentTransactions(userId, 3) // Get last 3 transactions
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -206,37 +219,168 @@ fun MainHomeScreen(
                 onReportsClick = onReportsClick
             )
 
-            // Volume Section
+            // Recent Transactions Section
             Card(
                 backgroundColor = YellowCard,
                 shape = RoundedCornerShape(12.dp),
                 elevation = 6.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp)
                 ) {
-                    Text(
-                        text = "300 mL",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-
+                    // Header with title and view all button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        VolumeIndicator(percentage = "25%", value = "0.00 mL")
-                        VolumeIndicator(percentage = "24%", value = "0.00 mL")
+                        Text(
+                            text = "Recent Transactions",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                        TextButton(
+                            onClick = onReportsClick,
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text(
+                                text = "View All",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.Black
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Transactions List
+                    if (recentTransactions.isEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                Icons.Filled.Receipt,
+                                contentDescription = "No transactions",
+                                tint = Color.Black.copy(alpha = 0.5f),
+                                modifier = Modifier.size(40.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "No recent transactions",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Normal,
+                                color = Color.Black.copy(alpha = 0.7f)
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            recentTransactions.forEachIndexed { index, transaction ->
+                                TransactionItem(transaction = transaction)
+                                if (index < recentTransactions.size - 1) {
+                                    Divider(
+                                        color = Color.Black.copy(alpha = 0.1f),
+                                        thickness = 1.dp,
+                                        modifier = Modifier.padding(vertical = 8.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+// ---------- TRANSACTION ITEM COMPOSABLE ----------
+@Composable
+fun TransactionItem(transaction: UserManager.Transaction) {
+    val isIncome = transaction.type == "deposit"
+    val amountColor = if (isIncome) Color(0xFF388E3C) else Color(0xFFD32F2F) // Green for income, red for expense
+    val amountPrefix = if (isIncome) "+" else "-"
+    val icon = when (transaction.type) {
+        "deposit" -> Icons.Filled.AccountBalanceWallet
+        "withdrawal" -> Icons.Filled.Money
+        "send" -> Icons.Filled.Send
+        else -> Icons.Filled.Receipt
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Icon
+        Card(
+            backgroundColor = YellowPrimary,
+            shape = RoundedCornerShape(8.dp),
+            elevation = 2.dp,
+            modifier = Modifier.size(40.dp)
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = transaction.type,
+                    tint = Color.Black,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        // Transaction Details
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = transaction.description,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = formatTransactionDate(transaction.timestamp),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Normal,
+                color = Color.Black.copy(alpha = 0.6f)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Amount
+        Text(
+            text = "$amountPrefix MWK ${String.format("%.2f", transaction.amount)}",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = amountColor
+        )
+    }
+}
+
+// ---------- DATE FORMATTER ----------
+private fun formatTransactionDate(date: Date): String {
+    val formatter = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+    return formatter.format(date)
 }
 
 // ---------- HOME SEND SCREEN ----------
@@ -908,25 +1052,6 @@ fun RowScope.GridButton(text: String, icon: ImageVector, onClick: () -> Unit = {
     }
 }
 
-// ---------- VOLUME INDICATOR ----------
-@Composable
-fun VolumeIndicator(percentage: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = percentage,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = Color.Black
-        )
-        Text(
-            text = value,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Normal,
-            color = Color.Black
-        )
-    }
-}
-
 // ---------- HOME DEPOSIT METHOD ITEM ----------
 @Composable
 fun HomeDepositMethodItem(title: String, description: String) {
@@ -1091,4 +1216,16 @@ fun PreviewHomeWithdrawScreen() {
 @Composable
 fun PreviewHomeReportsScreen() {
     HomeReportsScreen(userId = "test")
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PreviewTransactionItem() {
+    val transaction = UserManager.Transaction(
+        description = "Mobile money deposit",
+        amount = 1500.0,
+        timestamp = Date(),
+        type = "deposit"
+    )
+    TransactionItem(transaction = transaction)
 }

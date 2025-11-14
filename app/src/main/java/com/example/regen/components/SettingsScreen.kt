@@ -1,5 +1,6 @@
 package com.example.regen.components
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,12 +15,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
+import com.example.regen.managers.UserManager
+import com.example.regen.services.AuthService
+import kotlinx.coroutines.launch
 
 // ---------- COLOR PALETTE ----------
 private val YellowPrimary = Color(0xFFFFC107)
@@ -71,6 +76,22 @@ fun MainSettingsScreen(
     onAboutClick: () -> Unit = {},
     onLogout: () -> Unit = {}
 ) {
+    var userName by remember { mutableStateOf("Loading...") }
+    var userEmail by remember { mutableStateOf("Loading...") }
+    var showLogoutDialog by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+
+    // Load user data
+    LaunchedEffect(Unit) {
+        UserManager.getLocalUserName(context).collect { name ->
+            name?.let { userName = it }
+        }
+        UserManager.getLocalUserEmail(context).collect { email ->
+            email?.let { userEmail = it }
+        }
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -119,19 +140,19 @@ fun MainSettingsScreen(
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
                         Text(
-                            text = "MR JOHN LEVIS DOE",
+                            text = userName.uppercase(),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.Black
                         )
                         Text(
-                            text = "john.doe@example.com",
+                            text = userEmail,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Normal,
                             color = Color.Black
                         )
                         Text(
-                            text = "+265 123 456 789",
+                            text = "User ID: ${UserManager.getCurrentUserId()?.take(8) ?: "N/A"}",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Normal,
                             color = Color.Black.copy(alpha = 0.7f)
@@ -159,7 +180,7 @@ fun MainSettingsScreen(
 
             // Logout Button
             Button(
-                onClick = onLogout,
+                onClick = { showLogoutDialog = true },
                 colors = ButtonDefaults.buttonColors(
                     backgroundColor = Color.Red,
                     contentColor = Color.White
@@ -178,14 +199,55 @@ fun MainSettingsScreen(
             }
         }
     }
+
+    // Logout Confirmation Dialog
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Confirm Logout") },
+            text = { Text("Are you sure you want to logout?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                        onLogout()
+                    }
+                ) {
+                    Text("LOGOUT", color = Color.Red, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showLogoutDialog = false }
+                ) {
+                    Text("CANCEL", color = Color.Black)
+                }
+            }
+        )
+    }
 }
 
 // ---------- ACCOUNT SETTINGS SCREEN ----------
 @Composable
 fun AccountSettingsScreen(onBackClick: () -> Unit = {}) {
-    var fullName by remember { mutableStateOf("MR JOHN LEVIS DOE") }
-    var email by remember { mutableStateOf("john.doe@example.com") }
-    var phone by remember { mutableStateOf("+265 123 456 789") }
+    var fullName by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var saveSuccess by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    // Load user data
+    LaunchedEffect(Unit) {
+        UserManager.getLocalUserName(context).collect { name ->
+            name?.let { fullName = it }
+        }
+        UserManager.getLocalUserEmail(context).collect { userEmail ->
+            userEmail?.let { email = it }
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -248,7 +310,8 @@ fun AccountSettingsScreen(onBackClick: () -> Unit = {}) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 16.dp),
-                        singleLine = true
+                        singleLine = true,
+                        enabled = false // Email cannot be changed for now
                     )
 
                     OutlinedTextField(
@@ -263,16 +326,57 @@ fun AccountSettingsScreen(onBackClick: () -> Unit = {}) {
                     )
 
                     Button(
-                        onClick = { onBackClick() },
+                        onClick = {
+                            isLoading = true
+                            coroutineScope.launch {
+                                // Simulate save operation
+                                kotlinx.coroutines.delay(1000)
+
+                                // Save to local storage
+                                val userId = UserManager.getCurrentUserId()
+                                if (userId != null) {
+                                    UserManager.saveUserDataLocally(context, userId, fullName, email)
+                                }
+
+                                isLoading = false
+                                saveSuccess = true
+
+                                // Reset success message after 2 seconds
+                                kotlinx.coroutines.delay(2000)
+                                saveSuccess = false
+                            }
+                        },
                         colors = ButtonDefaults.buttonColors(
                             backgroundColor = YellowPrimary,
                             contentColor = Color.Black
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp)
+                            .height(50.dp),
+                        enabled = !isLoading && fullName.isNotBlank()
                     ) {
-                        Text("Save Changes", fontWeight = FontWeight.Bold)
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.dp
+                            )
+                        } else if (saveSuccess) {
+                            Icon(Icons.Filled.Check, contentDescription = "Saved")
+                        } else {
+                            Text("Save Changes", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    if (saveSuccess) {
+                        Text(
+                            text = "Changes saved successfully!",
+                            color = Color.Green,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
                     }
                 }
             }
@@ -335,6 +439,21 @@ fun NotificationsSettingsScreen(onBackClick: () -> Unit = {}) {
                     NotificationOption("Email Notifications", "Get updates via email", emailNotifications) { emailNotifications = it }
                     NotificationOption("SMS Notifications", "Receive text messages", smsNotifications) { smsNotifications = it }
                     NotificationOption("Transaction Alerts", "Alerts for all transactions", transactionAlerts) { transactionAlerts = it }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Button(
+                        onClick = { onBackClick() },
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = YellowPrimary,
+                            contentColor = Color.Black
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                    ) {
+                        Text("Save Preferences", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -344,8 +463,11 @@ fun NotificationsSettingsScreen(onBackClick: () -> Unit = {}) {
 // ---------- SECURITY SETTINGS SCREEN ----------
 @Composable
 fun SecuritySettingsScreen(onBackClick: () -> Unit = {}) {
-    var biometricEnabled by remember { mutableStateOf(true) }
+    var biometricEnabled by remember { mutableStateOf(false) }
     var twoFactorAuth by remember { mutableStateOf(false) }
+    var showChangePasswordDialog by remember { mutableStateOf(false) }
+
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -396,7 +518,7 @@ fun SecuritySettingsScreen(onBackClick: () -> Unit = {}) {
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Button(
-                        onClick = { /* TODO: Change password */ },
+                        onClick = { showChangePasswordDialog = true },
                         colors = ButtonDefaults.buttonColors(
                             backgroundColor = YellowPrimary,
                             contentColor = Color.Black
@@ -426,6 +548,56 @@ fun SecuritySettingsScreen(onBackClick: () -> Unit = {}) {
             }
         }
     }
+
+    // Change Password Dialog
+    if (showChangePasswordDialog) {
+        ChangePasswordDialog(
+            onDismiss = { showChangePasswordDialog = false },
+            onConfirm = { email ->
+                coroutineScope.launch {
+                    val result = AuthService.resetPassword(email)
+                    showChangePasswordDialog = false
+                    // Show result to user
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun ChangePasswordDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var email by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reset Password") },
+        text = {
+            Column {
+                Text("Enter your email to receive password reset instructions:")
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("Email Address") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(email) },
+                enabled = email.isNotBlank()
+            ) {
+                Text("SEND RESET LINK", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("CANCEL")
+            }
+        }
+    )
 }
 
 // ---------- PRIVACY SETTINGS SCREEN ----------
@@ -624,6 +796,21 @@ fun LanguageSettingsScreen(onBackClick: () -> Unit = {}) {
                     LanguageOption("Chichewa", selected = selectedLanguage == "Chichewa") { selectedLanguage = "Chichewa" }
                     LanguageOption("French", selected = selectedLanguage == "French") { selectedLanguage = "French" }
                     LanguageOption("Portuguese", selected = selectedLanguage == "Portuguese") { selectedLanguage = "Portuguese" }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Button(
+                        onClick = { onBackClick() },
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = YellowPrimary,
+                            contentColor = Color.Black
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                    ) {
+                        Text("Apply Language", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }

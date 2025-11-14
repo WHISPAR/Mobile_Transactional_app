@@ -1,5 +1,6 @@
 package com.example.regen.components
 
+import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.*
@@ -13,12 +14,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.regen.managers.UserManager
 import com.example.regen.services.AuthService
 import kotlinx.coroutines.launch
 
@@ -34,7 +37,7 @@ private const val DEFAULT_ADMIN_PASSWORD = "admin123"
 
 @Composable
 fun SigninScreen(
-    onSignInSuccess: () -> Unit,
+    onSignInSuccess: (userName: String) -> Unit,
     onNavigateToSignUp: () -> Unit = {}
 ) {
     var isSignIn by remember { mutableStateOf(true) }
@@ -47,6 +50,7 @@ fun SigninScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
     // Function to handle authentication
@@ -70,8 +74,9 @@ fun SigninScreen(
             try {
                 // Check for default admin login first
                 if (isSignIn && email == DEFAULT_ADMIN_EMAIL && password == DEFAULT_ADMIN_PASSWORD) {
-                    // Simulate successful admin login
-                    onSignInSuccess()
+                    // Save admin data locally
+                    UserManager.saveUserDataLocally(context, "admin_user", "Admin User", email)
+                    onSignInSuccess("Admin User")
                     return@launch
                 }
 
@@ -83,7 +88,22 @@ fun SigninScreen(
                 }
 
                 if (result.isSuccess) {
-                    onSignInSuccess()
+                    val userId = AuthService.getCurrentUserId()
+                    if (userId != null) {
+                        val userName = if (isSignIn) {
+                            // For sign in, try to get name from Firestore, fallback to email
+                            val userData = UserManager.getUserData(userId)
+                            userData?.name ?: email.substringBefore("@")
+                        } else {
+                            name
+                        }
+
+                        // Save user data locally
+                        UserManager.saveUserDataLocally(context, userId, userName, email)
+                        onSignInSuccess(userName)
+                    } else {
+                        errorMessage = "User authentication failed"
+                    }
                 } else {
                     errorMessage = result.exceptionOrNull()?.message ?: "Authentication failed"
                 }
@@ -141,7 +161,7 @@ fun SigninScreen(
                     value = name,
                     onValueChange = {
                         name = it
-                        errorMessage = null // Clear error when user types
+                        errorMessage = null
                     },
                     label = { Text("Full Name", color = DarkerGrayText) },
                     leadingIcon = {
@@ -165,7 +185,7 @@ fun SigninScreen(
                 value = email,
                 onValueChange = {
                     email = it
-                    errorMessage = null // Clear error when user types
+                    errorMessage = null
                 },
                 label = { Text("Email Address", color = DarkerGrayText) },
                 leadingIcon = {
@@ -189,7 +209,7 @@ fun SigninScreen(
                 value = password,
                 onValueChange = {
                     password = it
-                    errorMessage = null // Clear error when user types
+                    errorMessage = null
                 },
                 label = { Text("Password", color = DarkerGrayText) },
                 leadingIcon = {
@@ -224,7 +244,7 @@ fun SigninScreen(
                     value = confirmPassword,
                     onValueChange = {
                         confirmPassword = it
-                        errorMessage = null // Clear error when user types
+                        errorMessage = null
                     },
                     label = { Text("Confirm Password", color = DarkerGrayText) },
                     leadingIcon = {
@@ -304,7 +324,7 @@ fun SigninScreen(
                 TextButton(
                     onClick = {
                         isSignIn = !isSignIn
-                        errorMessage = null // Clear error when switching modes
+                        errorMessage = null
                     },
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = YellowPrimary
@@ -321,7 +341,21 @@ fun SigninScreen(
             // Forgot Password (only for sign in)
             if (isSignIn) {
                 TextButton(
-                    onClick = { /* Handle forgot password */ },
+                    onClick = {
+                        // Handle forgot password
+                        coroutineScope.launch {
+                            if (email.isNotBlank()) {
+                                val result = AuthService.resetPassword(email)
+                                if (result.isSuccess) {
+                                    errorMessage = "Password reset email sent to $email"
+                                } else {
+                                    errorMessage = result.exceptionOrNull()?.message ?: "Failed to send reset email"
+                                }
+                            } else {
+                                errorMessage = "Please enter your email address first"
+                            }
+                        }
+                    },
                     colors = ButtonDefaults.textButtonColors(
                         contentColor = DarkerGrayText
                     )

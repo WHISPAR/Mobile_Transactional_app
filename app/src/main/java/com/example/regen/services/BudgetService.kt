@@ -1,27 +1,30 @@
+// services/BudgetService.kt
 package com.example.regen.services
 
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 
 data class Budget(
-    val id: String,
-    val userId: String,
-    val category: String,
-    val icon: String,
-    val spent: Double,
-    val total: Double,
-    val color: String,
-    val createdAt: com.google.firebase.Timestamp
+    val id: String = "",
+    val userId: String = "",
+    val category: String = "",
+    val icon: String = "",
+    val spent: Double = 0.0,
+    val total: Double = 0.0,
+    val color: String = "#FFC107",
+    val createdAt: com.google.firebase.Timestamp = com.google.firebase.Timestamp.now()
 )
 
 object BudgetService {
     private val db = FirebaseFirestore.getInstance()
+    private const val COLLECTION_BUDGETS = "budgets"
 
     // Get all budgets for a user
     suspend fun getUserBudgets(userId: String): List<Budget> {
         return try {
-            val query = db.collection("budgets")
+            val query = db.collection(COLLECTION_BUDGETS)
                 .whereEqualTo("userId", userId)
+                .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
                 .get()
                 .await()
 
@@ -30,7 +33,7 @@ object BudgetService {
                     id = document.id,
                     userId = document.getString("userId") ?: "",
                     category = document.getString("category") ?: "",
-                    icon = document.getString("icon") ?: "",
+                    icon = document.getString("icon") ?: "shopping_cart",
                     spent = document.getDouble("spent") ?: 0.0,
                     total = document.getDouble("total") ?: 0.0,
                     color = document.getString("color") ?: "#FFC107",
@@ -43,20 +46,26 @@ object BudgetService {
     }
 
     // Add new budget
-    suspend fun addBudget(budget: Budget): Result<Boolean> {
+    suspend fun addBudget(
+        userId: String,
+        category: String,
+        total: Double,
+        icon: String = "shopping_cart",
+        color: String = "#FFC107"
+    ): Result<String> {
         return try {
             val budgetData = hashMapOf(
-                "userId" to budget.userId,
-                "category" to budget.category,
-                "icon" to budget.icon,
-                "spent" to budget.spent,
-                "total" to budget.total,
-                "color" to budget.color,
+                "userId" to userId,
+                "category" to category,
+                "icon" to icon,
+                "spent" to 0.0,
+                "total" to total,
+                "color" to color,
                 "createdAt" to com.google.firebase.Timestamp.now()
             )
 
-            db.collection("budgets").add(budgetData).await()
-            Result.success(true)
+            val documentRef = db.collection(COLLECTION_BUDGETS).add(budgetData).await()
+            Result.success(documentRef.id)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -65,7 +74,7 @@ object BudgetService {
     // Update budget
     suspend fun updateBudget(budgetId: String, updates: Map<String, Any>): Result<Boolean> {
         return try {
-            db.collection("budgets").document(budgetId)
+            db.collection(COLLECTION_BUDGETS).document(budgetId)
                 .update(updates)
                 .await()
             Result.success(true)
@@ -77,7 +86,7 @@ object BudgetService {
     // Delete budget
     suspend fun deleteBudget(budgetId: String): Result<Boolean> {
         return try {
-            db.collection("budgets").document(budgetId).delete().await()
+            db.collection(COLLECTION_BUDGETS).document(budgetId).delete().await()
             Result.success(true)
         } catch (e: Exception) {
             Result.failure(e)

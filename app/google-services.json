@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "53697418129",
-    "project_id": "regen-wallet-704d1",
-    "storage_bucket": "regen-wallet-704d1.firebasestorage.app"
+    "project_number": "765448985728",
+    "project_id": "regen-8401b",
+    "storage_bucket": "regen-8401b.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:53697418129:android:f1175bc5d8525997218030",
+        "mobilesdk_app_id": "1:765448985728:android:5a8dc4cc1bd515863b5a65",
         "android_client_info": {
           "package_name": "com.example.regen"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyAfGyqOzvpJriZni-KVgWW5hayfMZDuYhQ"
+          "current_key": "AIzaSyBZswSxFi3XEuFhTouQHikXn4qTJvUfHfw"
         }
       ],
       "services": {

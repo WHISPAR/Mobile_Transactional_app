@@ -13,11 +13,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.regen.managers.UserManager
+import kotlinx.coroutines.launch
 
 // ---------- COLOR PALETTE ----------
 private val YellowPrimary = Color(0xFFFFC107)
@@ -33,27 +36,92 @@ fun HomeScreen(
     onNotificationsClick: () -> Unit = {}
 ) {
     var currentScreen by remember { mutableStateOf("main") }
+    var userName by remember { mutableStateOf("Loading...") }
+    var userBalance by remember { mutableStateOf(0.0) }
+    var userId by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    // Load user data
+    LaunchedEffect(Unit) {
+        // Get current user ID
+        userId = UserManager.getCurrentUserId()
+
+        if (userId != null) {
+            // Try to get user data from Firestore
+            val userData = UserManager.getUserData(userId!!)
+            userData?.let {
+                userName = it.name.ifEmpty { "User" }
+                userBalance = it.balance
+
+                // Save to local storage
+                UserManager.saveUserDataLocally(context, userId!!, it.name, it.email)
+            }
+
+            // Fallback to local data if Firestore fails
+            if (userName == "Loading...") {
+                UserManager.getLocalUserName(context).collect { localName ->
+                    localName?.let {
+                        userName = it
+                    }
+                }
+            }
+        }
+    }
 
     when (currentScreen) {
         "main" -> MainHomeScreen(
+            userName = userName,
+            userBalance = userBalance,
             onWalletClick = onWalletClick,
             onBudgetClick = onBudgetClick,
             onSettingsClick = onSettingsClick,
             onNotificationsClick = onNotificationsClick,
             onSendClick = { currentScreen = "send" },
-            onDepositClick = { currentScreen = "deposit" },
-            onWithdrawClick = { currentScreen = "withdraw" },
+            onDepositClick = {
+                currentScreen = "deposit"
+            },
+            onWithdrawClick = {
+                currentScreen = "withdraw"
+            },
             onReportsClick = { currentScreen = "reports" }
         )
-        "send" -> HomeSendScreen(onBackClick = { currentScreen = "main" })
-        "deposit" -> HomeDepositScreen(onBackClick = { currentScreen = "main" })
-        "withdraw" -> HomeWithdrawScreen(onBackClick = { currentScreen = "main" })
-        "reports" -> HomeReportsScreen(onBackClick = { currentScreen = "main" })
+        "send" -> HomeSendScreen(
+            userId = userId,
+            currentBalance = userBalance,
+            onBackClick = { currentScreen = "main" },
+            onBalanceUpdate = { newBalance ->
+                userBalance = newBalance
+            }
+        )
+        "deposit" -> HomeDepositScreen(
+            userId = userId,
+            currentBalance = userBalance,
+            onBackClick = { currentScreen = "main" },
+            onBalanceUpdate = { newBalance ->
+                userBalance = newBalance
+            }
+        )
+        "withdraw" -> HomeWithdrawScreen(
+            userId = userId,
+            currentBalance = userBalance,
+            onBackClick = { currentScreen = "main" },
+            onBalanceUpdate = { newBalance ->
+                userBalance = newBalance
+            }
+        )
+        "reports" -> HomeReportsScreen(
+            userId = userId,
+            onBackClick = { currentScreen = "main" }
+        )
     }
 }
 
 @Composable
 fun MainHomeScreen(
+    userName: String = "User",
+    userBalance: Double = 0.0,
     onWalletClick: () -> Unit = {},
     onBudgetClick: () -> Unit = {},
     onSettingsClick: () -> Unit = {},
@@ -115,14 +183,14 @@ fun MainHomeScreen(
                         color = Color.Black
                     )
                     Text(
-                        text = "0.00 MWK",
+                        text = "MWK ${String.format("%.2f", userBalance)}",
                         fontSize = 26.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.Black
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "MR JOHN LEVIS DOE",
+                        text = userName.uppercase(),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Normal,
                         color = Color.Black
@@ -130,7 +198,7 @@ fun MainHomeScreen(
                 }
             }
 
-            // Main Action Buttons - Only Deposit, Withdraw, Send, Reports
+            // Main Action Buttons
             ActionButtonsGrid(
                 onSendClick = onSendClick,
                 onDepositClick = onDepositClick,
@@ -173,9 +241,17 @@ fun MainHomeScreen(
 
 // ---------- HOME SEND SCREEN ----------
 @Composable
-fun HomeSendScreen(onBackClick: () -> Unit = {}) {
+fun HomeSendScreen(
+    userId: String?,
+    currentBalance: Double,
+    onBackClick: () -> Unit = {},
+    onBalanceUpdate: (Double) -> Unit = {}
+) {
     var personNumber by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -222,6 +298,15 @@ fun HomeSendScreen(onBackClick: () -> Unit = {}) {
                         modifier = Modifier.padding(bottom = 24.dp)
                     )
 
+                    // Current Balance
+                    Text(
+                        text = "Current Balance: MWK ${String.format("%.2f", currentBalance)}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.Black,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
                     // Person Number Input
                     OutlinedTextField(
                         value = personNumber,
@@ -254,8 +339,32 @@ fun HomeSendScreen(onBackClick: () -> Unit = {}) {
                     // Send Button
                     Button(
                         onClick = {
-                            // TODO: Implement send money logic
-                            onBackClick()
+                            if (userId != null) {
+                                isLoading = true
+                                coroutineScope.launch {
+                                    val amountValue = amount.toDoubleOrNull() ?: 0.0
+                                    if (amountValue > 0 && amountValue <= currentBalance) {
+                                        // Update balance
+                                        val newBalance = currentBalance - amountValue
+                                        val success = UserManager.updateUserBalance(userId, newBalance)
+
+                                        if (success) {
+                                            // Add transaction
+                                            val transaction = UserManager.Transaction(
+                                                description = "Send money to $personNumber",
+                                                amount = amountValue,
+                                                timestamp = java.util.Date(),
+                                                type = "send"
+                                            )
+                                            UserManager.addTransaction(userId, transaction)
+
+                                            onBalanceUpdate(newBalance)
+                                            onBackClick()
+                                        }
+                                    }
+                                    isLoading = false
+                                }
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(
                             backgroundColor = YellowPrimary,
@@ -265,13 +374,21 @@ fun HomeSendScreen(onBackClick: () -> Unit = {}) {
                             .fillMaxWidth()
                             .height(50.dp),
                         shape = RoundedCornerShape(10.dp),
-                        enabled = personNumber.isNotBlank() && amount.isNotBlank()
+                        enabled = personNumber.isNotBlank() && amount.isNotBlank() && !isLoading
                     ) {
-                        Text(
-                            text = "Confirm & Send",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = "Confirm & Send",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -281,8 +398,16 @@ fun HomeSendScreen(onBackClick: () -> Unit = {}) {
 
 // ---------- HOME DEPOSIT SCREEN ----------
 @Composable
-fun HomeDepositScreen(onBackClick: () -> Unit = {}) {
+fun HomeDepositScreen(
+    userId: String?,
+    currentBalance: Double,
+    onBackClick: () -> Unit = {},
+    onBalanceUpdate: (Double) -> Unit = {}
+) {
     var amount by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -329,6 +454,15 @@ fun HomeDepositScreen(onBackClick: () -> Unit = {}) {
                         modifier = Modifier.padding(bottom = 24.dp)
                     )
 
+                    // Current Balance
+                    Text(
+                        text = "Current Balance: MWK ${String.format("%.2f", currentBalance)}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.Black,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
                     // Amount Input
                     OutlinedTextField(
                         value = amount,
@@ -363,8 +497,32 @@ fun HomeDepositScreen(onBackClick: () -> Unit = {}) {
                     // Deposit Button
                     Button(
                         onClick = {
-                            // TODO: Implement deposit logic
-                            onBackClick()
+                            if (userId != null) {
+                                isLoading = true
+                                coroutineScope.launch {
+                                    val amountValue = amount.toDoubleOrNull() ?: 0.0
+                                    if (amountValue > 0) {
+                                        // Update balance
+                                        val newBalance = currentBalance + amountValue
+                                        val success = UserManager.updateUserBalance(userId, newBalance)
+
+                                        if (success) {
+                                            // Add transaction
+                                            val transaction = UserManager.Transaction(
+                                                description = "Mobile money deposit",
+                                                amount = amountValue,
+                                                timestamp = java.util.Date(),
+                                                type = "deposit"
+                                            )
+                                            UserManager.addTransaction(userId, transaction)
+
+                                            onBalanceUpdate(newBalance)
+                                            onBackClick()
+                                        }
+                                    }
+                                    isLoading = false
+                                }
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(
                             backgroundColor = YellowPrimary,
@@ -374,13 +532,21 @@ fun HomeDepositScreen(onBackClick: () -> Unit = {}) {
                             .fillMaxWidth()
                             .height(50.dp),
                         shape = RoundedCornerShape(10.dp),
-                        enabled = amount.isNotBlank()
+                        enabled = amount.isNotBlank() && !isLoading
                     ) {
-                        Text(
-                            text = "Proceed to Deposit",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = "Proceed to Deposit",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -390,9 +556,17 @@ fun HomeDepositScreen(onBackClick: () -> Unit = {}) {
 
 // ---------- HOME WITHDRAW SCREEN ----------
 @Composable
-fun HomeWithdrawScreen(onBackClick: () -> Unit = {}) {
+fun HomeWithdrawScreen(
+    userId: String?,
+    currentBalance: Double,
+    onBackClick: () -> Unit = {},
+    onBalanceUpdate: (Double) -> Unit = {}
+) {
     var amount by remember { mutableStateOf("") }
     var selectedMethod by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -437,6 +611,15 @@ fun HomeWithdrawScreen(onBackClick: () -> Unit = {}) {
                         fontWeight = FontWeight.Bold,
                         color = Color.Black,
                         modifier = Modifier.padding(bottom = 24.dp)
+                    )
+
+                    // Current Balance
+                    Text(
+                        text = "Current Balance: MWK ${String.format("%.2f", currentBalance)}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.Black,
+                        modifier = Modifier.padding(bottom = 16.dp)
                     )
 
                     // Amount Input
@@ -488,8 +671,32 @@ fun HomeWithdrawScreen(onBackClick: () -> Unit = {}) {
                     // Withdraw Button
                     Button(
                         onClick = {
-                            // TODO: Implement withdraw logic
-                            onBackClick()
+                            if (userId != null) {
+                                isLoading = true
+                                coroutineScope.launch {
+                                    val amountValue = amount.toDoubleOrNull() ?: 0.0
+                                    if (amountValue > 0 && amountValue <= currentBalance) {
+                                        // Update balance
+                                        val newBalance = currentBalance - amountValue
+                                        val success = UserManager.updateUserBalance(userId, newBalance)
+
+                                        if (success) {
+                                            // Add transaction
+                                            val transaction = UserManager.Transaction(
+                                                description = "Withdrawal via $selectedMethod",
+                                                amount = amountValue,
+                                                timestamp = java.util.Date(),
+                                                type = "withdrawal"
+                                            )
+                                            UserManager.addTransaction(userId, transaction)
+
+                                            onBalanceUpdate(newBalance)
+                                            onBackClick()
+                                        }
+                                    }
+                                    isLoading = false
+                                }
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(
                             backgroundColor = YellowPrimary,
@@ -499,13 +706,21 @@ fun HomeWithdrawScreen(onBackClick: () -> Unit = {}) {
                             .fillMaxWidth()
                             .height(50.dp),
                         shape = RoundedCornerShape(10.dp),
-                        enabled = amount.isNotBlank() && selectedMethod.isNotBlank()
+                        enabled = amount.isNotBlank() && selectedMethod.isNotBlank() && !isLoading
                     ) {
-                        Text(
-                            text = "Confirm Withdrawal",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = "Confirm Withdrawal",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -515,7 +730,10 @@ fun HomeWithdrawScreen(onBackClick: () -> Unit = {}) {
 
 // ---------- HOME REPORTS SCREEN ----------
 @Composable
-fun HomeReportsScreen(onBackClick: () -> Unit = {}) {
+fun HomeReportsScreen(
+    userId: String?,
+    onBackClick: () -> Unit = {}
+) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -755,7 +973,12 @@ fun HomeDepositMethodItem(title: String, description: String) {
 
 // ---------- HOME WITHDRAW METHOD ITEM ----------
 @Composable
-fun HomeWithdrawMethodItem(title: String, description: String, selected: Boolean, onClick: () -> Unit) {
+fun HomeWithdrawMethodItem(
+    title: String,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
     Card(
         backgroundColor = LightGrayBackground,
         shape = RoundedCornerShape(8.dp),
@@ -849,23 +1072,23 @@ fun PreviewHomeScreen() {
 @Preview(showBackground = true)
 @Composable
 fun PreviewHomeSendScreen() {
-    HomeSendScreen()
+    HomeSendScreen(userId = "test", currentBalance = 1000.0)
 }
 
 @Preview(showBackground = true)
 @Composable
 fun PreviewHomeDepositScreen() {
-    HomeDepositScreen()
+    HomeDepositScreen(userId = "test", currentBalance = 1000.0)
 }
 
 @Preview(showBackground = true)
 @Composable
 fun PreviewHomeWithdrawScreen() {
-    HomeWithdrawScreen()
+    HomeWithdrawScreen(userId = "test", currentBalance = 1000.0)
 }
 
 @Preview(showBackground = true)
 @Composable
 fun PreviewHomeReportsScreen() {
-    HomeReportsScreen()
+    HomeReportsScreen(userId = "test")
 }

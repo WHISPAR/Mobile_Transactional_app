@@ -21,6 +21,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.regen.managers.UserManager
+import com.example.regen.managers.PaymentManager
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -29,6 +30,7 @@ import java.util.*
 private val YellowPrimary = Color(0xFFFFC107)
 private val YellowCard = Color(0xFFFFEB3B)
 private val LightGrayBackground = Color(0xFFF5F5F5)
+private val ErrorRed = Color(0xFFF44336) // Added for error messages
 
 // ---------- MAIN SCREEN -----THE FRONT PAGE-----
 @Composable
@@ -394,6 +396,7 @@ fun HomeSendScreen(
     var personNumber by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) } // Added error message
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -451,23 +454,40 @@ fun HomeSendScreen(
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
 
+                    // Error Message
+                    errorMessage?.let { message ->
+                        Text(
+                            text = message,
+                            color = ErrorRed,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+                    }
+
                     // Person Number Input
                     OutlinedTextField(
                         value = personNumber,
-                        onValueChange = { personNumber = it },
+                        onValueChange = {
+                            personNumber = it
+                            errorMessage = null // Clear error when user types
+                        },
                         label = { Text("Person Number") },
                         placeholder = { Text("Enter recipient's number") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 16.dp),
-                        singleLine = true
+                        singleLine = true,
+                        isError = errorMessage != null
                     )
 
                     // Amount Input
                     OutlinedTextField(
                         value = amount,
-                        onValueChange = { amount = it },
+                        onValueChange = {
+                            amount = it
+                            errorMessage = null // Clear error when user types
+                        },
                         label = { Text("Amount") },
                         placeholder = { Text("Enter amount in MWK") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -477,7 +497,8 @@ fun HomeSendScreen(
                         singleLine = true,
                         leadingIcon = {
                             Text("MWK", modifier = Modifier.padding(end = 8.dp))
-                        }
+                        },
+                        isError = errorMessage != null
                     )
 
                     // Send Button
@@ -485,9 +506,21 @@ fun HomeSendScreen(
                         onClick = {
                             if (userId != null) {
                                 isLoading = true
+                                errorMessage = null
+
                                 coroutineScope.launch {
                                     val amountValue = amount.toDoubleOrNull() ?: 0.0
-                                    if (amountValue > 0 && amountValue <= currentBalance) {
+
+                                    // Validation
+                                    if (personNumber.isBlank()) {
+                                        errorMessage = "Please enter recipient's number"
+                                    } else if (amount.isBlank()) {
+                                        errorMessage = "Please enter amount"
+                                    } else if (amountValue <= 0) {
+                                        errorMessage = "Please enter a valid amount"
+                                    } else if (amountValue > currentBalance) {
+                                        errorMessage = "Insufficient balance"
+                                    } else {
                                         // Update balance
                                         val newBalance = currentBalance - amountValue
                                         val success = UserManager.updateUserBalance(userId, newBalance)
@@ -504,6 +537,8 @@ fun HomeSendScreen(
 
                                             onBalanceUpdate(newBalance)
                                             onBackClick()
+                                        } else {
+                                            errorMessage = "Transaction failed. Please try again."
                                         }
                                     }
                                     isLoading = false
@@ -549,7 +584,9 @@ fun HomeDepositScreen(
     onBalanceUpdate: (Double) -> Unit = {}
 ) {
     var amount by remember { mutableStateOf("") }
+    var selectedMethod by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) } // Added error message
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -607,10 +644,23 @@ fun HomeDepositScreen(
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
 
+                    // Error Message
+                    errorMessage?.let { message ->
+                        Text(
+                            text = message,
+                            color = ErrorRed,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+                    }
+
                     // Amount Input
                     OutlinedTextField(
                         value = amount,
-                        onValueChange = { amount = it },
+                        onValueChange = {
+                            amount = it
+                            errorMessage = null // Clear error when user types
+                        },
                         label = { Text("Deposit Amount") },
                         placeholder = { Text("Enter amount in MWK") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -620,7 +670,8 @@ fun HomeDepositScreen(
                         singleLine = true,
                         leadingIcon = {
                             Text("MWK", modifier = Modifier.padding(end = 8.dp))
-                        }
+                        },
+                        isError = errorMessage != null
                     )
 
                     // Deposit Methods
@@ -632,9 +683,25 @@ fun HomeDepositScreen(
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
 
-                    HomeDepositMethodItem("Mobile Money", "Add funds via Airtel Money or TNM Mpamba")
-                    HomeDepositMethodItem("Bank Transfer", "Transfer from your bank account")
-                    HomeDepositMethodItem("Cash Agent", "Visit nearby agent to deposit cash")
+                    // FIXED: Now with proper selection handling
+                    HomeDepositMethodItem(
+                        title = "Mobile Money",
+                        description = "Add funds via Airtel Money or TNM Mpamba",
+                        selected = selectedMethod == "mobile",
+                        onClick = { selectedMethod = "mobile" }
+                    )
+                    HomeDepositMethodItem(
+                        title = "Bank Transfer",
+                        description = "Transfer from your bank account",
+                        selected = selectedMethod == "bank",
+                        onClick = { selectedMethod = "bank" }
+                    )
+                    HomeDepositMethodItem(
+                        title = "Cash Agent",
+                        description = "Visit nearby agent to deposit cash",
+                        selected = selectedMethod == "agent",
+                        onClick = { selectedMethod = "agent" }
+                    )
 
                     Spacer(modifier = Modifier.height(24.dp))
 
@@ -643,9 +710,19 @@ fun HomeDepositScreen(
                         onClick = {
                             if (userId != null) {
                                 isLoading = true
+                                errorMessage = null
+
                                 coroutineScope.launch {
                                     val amountValue = amount.toDoubleOrNull() ?: 0.0
-                                    if (amountValue > 0) {
+
+                                    // Validation
+                                    if (amount.isBlank()) {
+                                        errorMessage = "Please enter amount"
+                                    } else if (amountValue <= 0) {
+                                        errorMessage = "Please enter a valid amount"
+                                    } else if (selectedMethod.isEmpty()) {
+                                        errorMessage = "Please select a deposit method"
+                                    } else {
                                         // Update balance
                                         val newBalance = currentBalance + amountValue
                                         val success = UserManager.updateUserBalance(userId, newBalance)
@@ -653,7 +730,7 @@ fun HomeDepositScreen(
                                         if (success) {
                                             // Add transaction
                                             val transaction = UserManager.Transaction(
-                                                description = "Mobile money deposit",
+                                                description = "Deposit via $selectedMethod",
                                                 amount = amountValue,
                                                 timestamp = java.util.Date(),
                                                 type = "deposit"
@@ -662,6 +739,8 @@ fun HomeDepositScreen(
 
                                             onBalanceUpdate(newBalance)
                                             onBackClick()
+                                        } else {
+                                            errorMessage = "Deposit failed. Please try again."
                                         }
                                     }
                                     isLoading = false
@@ -676,7 +755,7 @@ fun HomeDepositScreen(
                             .fillMaxWidth()
                             .height(50.dp),
                         shape = RoundedCornerShape(10.dp),
-                        enabled = amount.isNotBlank() && !isLoading
+                        enabled = amount.isNotBlank() && selectedMethod.isNotBlank() && !isLoading
                     ) {
                         if (isLoading) {
                             CircularProgressIndicator(
@@ -709,6 +788,7 @@ fun HomeWithdrawScreen(
     var amount by remember { mutableStateOf("") }
     var selectedMethod by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) } // Added error message
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -766,10 +846,23 @@ fun HomeWithdrawScreen(
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
 
+                    // Error Message
+                    errorMessage?.let { message ->
+                        Text(
+                            text = message,
+                            color = ErrorRed,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+                    }
+
                     // Amount Input
                     OutlinedTextField(
                         value = amount,
-                        onValueChange = { amount = it },
+                        onValueChange = {
+                            amount = it
+                            errorMessage = null // Clear error when user types
+                        },
                         label = { Text("Withdrawal Amount") },
                         placeholder = { Text("Enter amount in MWK") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -779,7 +872,8 @@ fun HomeWithdrawScreen(
                         singleLine = true,
                         leadingIcon = {
                             Text("MWK", modifier = Modifier.padding(end = 8.dp))
-                        }
+                        },
+                        isError = errorMessage != null
                     )
 
                     // Withdrawal Methods
@@ -817,9 +911,21 @@ fun HomeWithdrawScreen(
                         onClick = {
                             if (userId != null) {
                                 isLoading = true
+                                errorMessage = null
+
                                 coroutineScope.launch {
                                     val amountValue = amount.toDoubleOrNull() ?: 0.0
-                                    if (amountValue > 0 && amountValue <= currentBalance) {
+
+                                    // Validation
+                                    if (amount.isBlank()) {
+                                        errorMessage = "Please enter amount"
+                                    } else if (amountValue <= 0) {
+                                        errorMessage = "Please enter a valid amount"
+                                    } else if (amountValue > currentBalance) {
+                                        errorMessage = "Insufficient balance"
+                                    } else if (selectedMethod.isEmpty()) {
+                                        errorMessage = "Please select a withdrawal method"
+                                    } else {
                                         // Update balance
                                         val newBalance = currentBalance - amountValue
                                         val success = UserManager.updateUserBalance(userId, newBalance)
@@ -836,6 +942,8 @@ fun HomeWithdrawScreen(
 
                                             onBalanceUpdate(newBalance)
                                             onBackClick()
+                                        } else {
+                                            errorMessage = "Withdrawal failed. Please try again."
                                         }
                                     }
                                     isLoading = false
@@ -1052,9 +1160,14 @@ fun RowScope.GridButton(text: String, icon: ImageVector, onClick: () -> Unit = {
     }
 }
 
-// ---------- HOME DEPOSIT METHOD ITEM ----------
+// ---------- HOME DEPOSIT METHOD ITEM (FIXED) ----------
 @Composable
-fun HomeDepositMethodItem(title: String, description: String) {
+fun HomeDepositMethodItem(
+    title: String,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
     Card(
         backgroundColor = LightGrayBackground,
         shape = RoundedCornerShape(8.dp),
@@ -1086,8 +1199,8 @@ fun HomeDepositMethodItem(title: String, description: String) {
                 )
             }
             RadioButton(
-                selected = false,
-                onClick = { /* TODO: Handle selection */ },
+                selected = selected,
+                onClick = onClick,
                 colors = RadioButtonDefaults.colors(
                     selectedColor = YellowPrimary
                 )

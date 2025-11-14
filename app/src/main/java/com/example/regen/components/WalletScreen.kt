@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,7 +63,7 @@ fun WalletScreen(onBackClick: () -> Unit = {}) {
                 userBalance = newBalance
             }
         )
-        "send" -> SendScreen(
+        "send" -> WalletSendScreen(
             userId = userId,
             currentBalance = userBalance,
             onBackClick = { currentScreen = "main" },
@@ -70,10 +71,10 @@ fun WalletScreen(onBackClick: () -> Unit = {}) {
                 userBalance = newBalance
             }
         )
-        "receive" -> ReceiveScreen(
+        "receive" -> WalletReceiveScreen(
             onBackClick = { currentScreen = "main" }
         )
-        "deposit" -> DepositScreen(
+        "deposit" -> WalletDepositScreen(
             userId = userId,
             currentBalance = userBalance,
             onBackClick = { currentScreen = "main" },
@@ -171,9 +172,9 @@ fun MainWalletScreen(
                     .padding(bottom = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                ActionButton("Send", Icons.AutoMirrored.Filled.Send, onClick = onSendClick)
-                ActionButton("Receive", Icons.Filled.RequestQuote, onClick = onReceiveClick)
-                ActionButton("Deposit", Icons.Filled.Add, onClick = onDepositClick)
+                WalletActionButton("Send", Icons.AutoMirrored.Filled.Send, onClick = onSendClick)
+                WalletActionButton("Receive", Icons.Filled.RequestQuote, onClick = onReceiveClick)
+                WalletActionButton("Deposit", Icons.Filled.Add, onClick = onDepositClick)
             }
 
             // Transaction History
@@ -241,9 +242,9 @@ fun MainWalletScreen(
     }
 }
 
-// ---------- SEND SCREEN ----------
+// ---------- WALLET SEND SCREEN ----------
 @Composable
-fun SendScreen(
+fun WalletSendScreen(
     userId: String?,
     currentBalance: Double,
     onBackClick: () -> Unit = {},
@@ -426,9 +427,9 @@ fun SendScreen(
     }
 }
 
-// ---------- RECEIVE SCREEN ----------
+// ---------- WALLET RECEIVE SCREEN ----------
 @Composable
-fun ReceiveScreen(onBackClick: () -> Unit = {}) {
+fun WalletReceiveScreen(onBackClick: () -> Unit = {}) {
     val context = LocalContext.current
     var userPhoneNumber by remember { mutableStateOf("265 991 034 749") }
 
@@ -528,7 +529,7 @@ fun ReceiveScreen(onBackClick: () -> Unit = {}) {
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Normal,
                         color = Color.Gray,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        textAlign = TextAlign.Center
                     )
                 }
             }
@@ -536,9 +537,9 @@ fun ReceiveScreen(onBackClick: () -> Unit = {}) {
     }
 }
 
-// ---------- DEPOSIT SCREEN ----------
+// ---------- WALLET DEPOSIT SCREEN ----------
 @Composable
-fun DepositScreen(
+fun WalletDepositScreen(
     userId: String?,
     currentBalance: Double,
     onBackClick: () -> Unit = {},
@@ -642,19 +643,19 @@ fun DepositScreen(
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
 
-                    DepositMethodItem(
+                    WalletDepositMethodItem(
                         "Mobile Money",
                         "Add funds via Airtel Money or TNM Mpamba",
                         selected = selectedMethod == "mobile",
                         onClick = { selectedMethod = "mobile" }
                     )
-                    DepositMethodItem(
+                    WalletDepositMethodItem(
                         "Bank Transfer",
                         "Transfer from your bank account",
                         selected = selectedMethod == "bank",
                         onClick = { selectedMethod = "bank" }
                     )
-                    DepositMethodItem(
+                    WalletDepositMethodItem(
                         "Cash Agent",
                         "Visit nearby agent to deposit cash",
                         selected = selectedMethod == "agent",
@@ -734,7 +735,7 @@ fun DepositScreen(
 }
 
 @Composable
-fun DepositMethodItem(
+fun WalletDepositMethodItem(
     title: String,
     description: String,
     selected: Boolean,
@@ -832,7 +833,7 @@ fun WalletTransactionItem(transaction: UserManager.Transaction) {
                 color = Color.Black
             )
             Text(
-                text = formatTransactionDate(transaction.timestamp),
+                text = formatWalletTransactionDate(transaction.timestamp),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Normal,
                 color = Color.Gray
@@ -852,7 +853,7 @@ fun WalletTransactionItem(transaction: UserManager.Transaction) {
 }
 
 @Composable
-fun RowScope.ActionButton(text: String, icon: ImageVector, onClick: () -> Unit) {
+fun RowScope.WalletActionButton(text: String, icon: ImageVector, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(
@@ -880,7 +881,7 @@ fun RowScope.ActionButton(text: String, icon: ImageVector, onClick: () -> Unit) 
     }
 }
 
-private fun formatTransactionDate(date: Date): String {
+private fun formatWalletTransactionDate(date: Date): String {
     val formatter = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
     return formatter.format(date)
 }
@@ -893,18 +894,18 @@ fun PreviewWalletScreen() {
 
 @Preview(showBackground = true)
 @Composable
-fun PreviewSendScreen() {
-    SendScreen(userId = "test", currentBalance = 1000.0)
+fun PreviewWalletSendScreen() {
+    WalletSendScreen(userId = "test", currentBalance = 1000.0)
 }
 
 @Preview(showBackground = true)
 @Composable
-fun PreviewReceiveScreen() {
-    ReceiveScreen()
+fun PreviewWalletReceiveScreen() {
+    WalletReceiveScreen()
 }
 
 @Preview(showBackground = true)
 @Composable
-fun PreviewDepositScreen() {
-    DepositScreen(userId = "test", currentBalance = 1000.0)
+fun PreviewWalletDepositScreen() {
+    WalletDepositScreen(userId = "test", currentBalance = 1000.0)
 }

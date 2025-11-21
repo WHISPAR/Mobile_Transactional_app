@@ -63,7 +63,7 @@ fun Budget.toManagerBudget(): UserManager.Budget {
         iconName = getIconName(this.icon),
         spent = this.spent,
         total = this.total,
-        color = this.color.toArgb(),
+        color = this.color.toArgb(), // Convert Color to Int
         createdAt = this.createdAt
     )
 }
@@ -75,7 +75,7 @@ fun UserManager.Budget.toUIBudget(): Budget {
         icon = getIconFromName(this.iconName),
         spent = this.spent,
         total = this.total,
-        color = Color(this.color),
+        color = Color(this.color), // Convert Int to Color
         createdAt = this.createdAt
     )
 }
@@ -91,6 +91,8 @@ private fun getIconName(icon: ImageVector): String {
         Icons.Default.School -> "School"
         Icons.Default.ShoppingBasket -> "ShoppingBasket"
         Icons.Default.Restaurant -> "Restaurant"
+        Icons.Default.AccountBalanceWallet -> "AccountBalanceWallet"
+        Icons.Default.Savings -> "Savings"
         else -> "Category"
     }
 }
@@ -105,6 +107,8 @@ private fun getIconFromName(iconName: String): ImageVector {
         "School" -> Icons.Default.School
         "ShoppingBasket" -> Icons.Default.ShoppingBasket
         "Restaurant" -> Icons.Default.Restaurant
+        "AccountBalanceWallet" -> Icons.Default.AccountBalanceWallet
+        "Savings" -> Icons.Default.Savings
         else -> Icons.Default.Category
     }
 }
@@ -115,21 +119,27 @@ fun BudgetScreen(onBackClick: () -> Unit = {}) {
     var currentScreen by remember { mutableStateOf("main") }
     var budgets by remember { mutableStateOf<List<Budget>>(emptyList()) }
     var userBalance by remember { mutableStateOf(0.0) }
+    var selectedBudget by remember { mutableStateOf<Budget?>(null) }
     val userId = UserManager.getCurrentUserId()
     val coroutineScope = rememberCoroutineScope()
 
     // Load user data and budgets
     LaunchedEffect(userId) {
         if (userId != null) {
-            // Load user balance
-            val userData = UserManager.getUserData(userId)
-            userData?.let {
-                userBalance = it.balance
+            loadUserData(userId, budgets, userBalance) { updatedBudgets, updatedBalance ->
+                budgets = updatedBudgets
+                userBalance = updatedBalance
             }
+        }
+    }
 
-            // Load budgets from storage
-            val managerBudgets = UserManager.getUserBudgets(userId)
-            budgets = managerBudgets.map { it.toUIBudget() }
+    // Refresh data when returning to main screen
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == "main" && userId != null) {
+            loadUserData(userId, budgets, userBalance) { updatedBudgets, updatedBalance ->
+                budgets = updatedBudgets
+                userBalance = updatedBalance
+            }
         }
     }
 
@@ -140,8 +150,16 @@ fun BudgetScreen(onBackClick: () -> Unit = {}) {
             onBackClick = onBackClick,
             onAddBudgetClick = { currentScreen = "add" },
             onBudgetClick = { budget ->
-                // Navigate to budget detail or edit
+                selectedBudget = budget
                 currentScreen = "edit"
+            },
+            onDeleteBudget = { budget ->
+                coroutineScope.launch {
+                    val success = UserManager.deleteBudget(budget.id)
+                    if (success) {
+                        budgets = budgets.filter { it.id != budget.id }
+                    }
+                }
             }
         )
         "add" -> AddBudgetScreen(
@@ -158,9 +176,45 @@ fun BudgetScreen(onBackClick: () -> Unit = {}) {
             }
         )
         "edit" -> EditBudgetScreen(
-            onBackClick = { currentScreen = "main" }
+            budget = selectedBudget,
+            onBackClick = { currentScreen = "main" },
+            onBudgetUpdated = { updatedBudget ->
+                coroutineScope.launch {
+                    val success = UserManager.saveBudget(updatedBudget.toManagerBudget())
+                    if (success) {
+                        budgets = budgets.map { if (it.id == updatedBudget.id) updatedBudget else it }
+                        currentScreen = "main"
+                    }
+                }
+            },
+            onBudgetDeleted = { budget ->
+                coroutineScope.launch {
+                    val success = UserManager.deleteBudget(budget.id)
+                    if (success) {
+                        budgets = budgets.filter { it.id != budget.id }
+                        currentScreen = "main"
+                    }
+                }
+            }
         )
     }
+}
+
+private suspend fun loadUserData(
+    userId: String,
+    currentBudgets: List<Budget>,
+    currentBalance: Double,
+    onDataLoaded: (List<Budget>, Double) -> Unit
+) {
+    // Load user balance
+    val userData = UserManager.getUserData(userId)
+    val updatedBalance = userData?.balance ?: currentBalance
+
+    // Load budgets from Firestore
+    val managerBudgets = UserManager.getUserBudgets(userId)
+    val updatedBudgets = managerBudgets.map { it.toUIBudget() }
+
+    onDataLoaded(updatedBudgets, updatedBalance)
 }
 
 @Composable
@@ -169,11 +223,13 @@ fun MainBudgetScreen(
     userBalance: Double = 0.0,
     onBackClick: () -> Unit = {},
     onAddBudgetClick: () -> Unit = {},
-    onBudgetClick: (Budget) -> Unit = {}
+    onBudgetClick: (Budget) -> Unit = {},
+    onDeleteBudget: (Budget) -> Unit = {}
 ) {
     val totalBudget = budgets.sumOf { it.total }
     val totalSpent = budgets.sumOf { it.spent }
     val remainingBudget = totalBudget - totalSpent
+    val budgetUtilization = if (totalBudget > 0) (totalSpent / totalBudget) * 100 else 0.0
 
     Scaffold(
         topBar = {
@@ -218,18 +274,31 @@ fun MainBudgetScreen(
                     totalSpent = totalSpent,
                     totalBudget = totalBudget,
                     remainingBudget = remainingBudget,
-                    userBalance = userBalance
+                    userBalance = userBalance,
+                    budgetUtilization = budgetUtilization
                 )
             }
 
+            // --- Budget Utilization Warning ---
+            if (budgetUtilization > 80 && budgets.isNotEmpty()) {
+                item {
+                    BudgetWarningCard(
+                        utilization = budgetUtilization,
+                        isOverBudget = remainingBudget < 0
+                    )
+                }
+            }
+
             // --- Section Header: Categories ---
-            item {
-                Text(
-                    text = "BUDGET CATEGORIES",
-                    style = MaterialTheme.typography.overline,
-                    modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 8.dp),
-                    color = DarkerGrayText
-                )
+            if (budgets.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "BUDGET CATEGORIES",
+                        style = MaterialTheme.typography.overline,
+                        modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 8.dp),
+                        color = DarkerGrayText
+                    )
+                }
             }
 
             // --- List of Individual Budget Items ---
@@ -241,7 +310,8 @@ fun MainBudgetScreen(
                 items(budgets) { budget ->
                     BudgetItemCard(
                         budget = budget,
-                        onClick = { onBudgetClick(budget) }
+                        onClick = { onBudgetClick(budget) },
+                        onDelete = { onDeleteBudget(budget) }
                     )
                 }
             }
@@ -254,7 +324,8 @@ fun OverallBudgetSummaryCard(
     totalSpent: Double,
     totalBudget: Double,
     remainingBudget: Double,
-    userBalance: Double
+    userBalance: Double,
+    budgetUtilization: Double
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -290,6 +361,43 @@ fun OverallBudgetSummaryCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Progress Bar for Overall Budget
+            if (totalBudget > 0) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Budget Utilization", style = MaterialTheme.typography.caption, color = DarkerGrayText)
+                        Text(
+                            "${budgetUtilization.toInt()}%",
+                            style = MaterialTheme.typography.caption,
+                            fontWeight = FontWeight.Bold,
+                            color = when {
+                                budgetUtilization > 90 -> ErrorRed
+                                budgetUtilization > 75 -> WarningOrange
+                                else -> SuccessGreen
+                            }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LinearProgressIndicator(
+                        progress = (budgetUtilization / 100).toFloat().coerceIn(0f, 1f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = when {
+                            budgetUtilization > 90 -> ErrorRed
+                            budgetUtilization > 75 -> WarningOrange
+                            else -> SuccessGreen
+                        },
+                        backgroundColor = LightGrayBackground
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceAround
@@ -308,6 +416,47 @@ fun OverallBudgetSummaryCard(
                     label = "Remaining",
                     value = "MWK ${"%,.2f".format(remainingBudget)}",
                     color = if (remainingBudget >= 0) SuccessGreen else ErrorRed
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun BudgetWarningCard(utilization: Double, isOverBudget: Boolean) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        backgroundColor = if (isOverBudget) ErrorRed.copy(alpha = 0.1f) else WarningOrange.copy(alpha = 0.1f),
+        elevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                if (isOverBudget) Icons.Default.Warning else Icons.Default.Info,
+                contentDescription = "Warning",
+                tint = if (isOverBudget) ErrorRed else WarningOrange,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isOverBudget) "Budget Exceeded!" else "Budget Alert",
+                    style = MaterialTheme.typography.subtitle2,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isOverBudget) ErrorRed else WarningOrange
+                )
+                Text(
+                    text = if (isOverBudget)
+                        "You have exceeded your total budget. Consider reviewing your spending."
+                    else
+                        "You've used ${utilization.toInt()}% of your budget. Consider slowing down.",
+                    style = MaterialTheme.typography.caption,
+                    color = DarkerGrayText
                 )
             }
         }
@@ -337,10 +486,35 @@ fun SummaryItem(label: String, value: String, color: Color = Color.Black) {
 }
 
 @Composable
-fun BudgetItemCard(budget: Budget, onClick: () -> Unit) {
+fun BudgetItemCard(budget: Budget, onClick: () -> Unit, onDelete: () -> Unit) {
     val progress = (budget.spent / budget.total).toFloat().coerceIn(0f, 1f)
     val amountText = "MWK ${"%,.2f".format(budget.spent)} / ${"%,.2f".format(budget.total)}"
     val isOverBudget = budget.spent > budget.total
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Budget") },
+            text = { Text("Are you sure you want to delete the ${budget.category} budget? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete()
+                        showDeleteDialog = false
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = ErrorRed)
+                ) {
+                    Text("DELETE")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("CANCEL")
+                }
+            }
+        )
+    }
 
     Card(
         modifier = Modifier
@@ -378,13 +552,26 @@ fun BudgetItemCard(budget: Budget, onClick: () -> Unit) {
                     )
                 }
 
-                // Percentage
-                Text(
-                    text = "${(progress * 100).toInt()}%",
-                    style = MaterialTheme.typography.body2,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isOverBudget) ErrorRed else DarkerGrayText
-                )
+                // Percentage and Delete Button
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${(progress * 100).toInt()}%",
+                        style = MaterialTheme.typography.body2,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isOverBudget) ErrorRed else DarkerGrayText
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = { showDeleteDialog = true },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete Budget",
+                            tint = ErrorRed.copy(alpha = 0.6f)
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -396,7 +583,11 @@ fun BudgetItemCard(budget: Budget, onClick: () -> Unit) {
                     .fillMaxWidth()
                     .height(8.dp)
                     .clip(RoundedCornerShape(4.dp)),
-                color = if (isOverBudget) ErrorRed else budget.color,
+                color = when {
+                    isOverBudget -> ErrorRed
+                    progress > 0.8 -> WarningOrange
+                    else -> budget.color
+                },
                 backgroundColor = budget.color.copy(alpha = 0.2f)
             )
         }
@@ -433,7 +624,7 @@ fun EmptyBudgetsState(onAddBudgetClick: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Create your first budget to start tracking your expenses",
+                text = "Create your first budget to start tracking your expenses and manage your spending effectively",
                 style = MaterialTheme.typography.body2,
                 color = DarkerGrayText,
                 textAlign = TextAlign.Center
@@ -475,7 +666,9 @@ fun AddBudgetScreen(
         BudgetCategory("Healthcare", Icons.Default.LocalHospital, Color(0xFF9C27B0)),
         BudgetCategory("Education", Icons.Default.School, Color(0xFF607D8B)),
         BudgetCategory("Shopping", Icons.Default.ShoppingBasket, Color(0xFFFF5722)),
-        BudgetCategory("Dining", Icons.Default.Restaurant, Color(0xFF795548))
+        BudgetCategory("Dining", Icons.Default.Restaurant, Color(0xFF795548)),
+        BudgetCategory("Deposit", Icons.Default.AccountBalanceWallet, Color(0xFF009688)),
+        BudgetCategory("Savings", Icons.Default.Savings, Color(0xFF3F51B5))
     )
 
     Scaffold(
@@ -578,7 +771,11 @@ fun AddBudgetScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 16.dp),
-                        singleLine = true
+                        singleLine = true,
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            focusedBorderColor = YellowPrimary,
+                            focusedLabelColor = YellowPrimary
+                        )
                     )
 
                     // Amount Input
@@ -597,7 +794,11 @@ fun AddBudgetScreen(
                         singleLine = true,
                         leadingIcon = {
                             Text("MWK", modifier = Modifier.padding(end = 8.dp))
-                        }
+                        },
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            focusedBorderColor = YellowPrimary,
+                            focusedLabelColor = YellowPrimary
+                        )
                     )
 
                     // Create Button
@@ -609,6 +810,8 @@ fun AddBudgetScreen(
                                 errorMessage = "Please enter a valid amount"
                             } else if (amount.toDouble() <= 0) {
                                 errorMessage = "Amount must be greater than 0"
+                            } else if (amount.toDouble() > userBalance) {
+                                errorMessage = "Budget amount cannot exceed your available balance"
                             } else {
                                 isLoading = true
                                 coroutineScope.launch {
@@ -687,9 +890,47 @@ fun CategoryChip(category: BudgetCategory, selected: Boolean, onClick: () -> Uni
 }
 
 @Composable
-fun EditBudgetScreen(onBackClick: () -> Unit = {}) {
-    // Implementation for editing existing budgets
-    // Similar to AddBudgetScreen but with pre-filled data
+fun EditBudgetScreen(
+    budget: Budget?,
+    onBackClick: () -> Unit = {},
+    onBudgetUpdated: (Budget) -> Unit = {},
+    onBudgetDeleted: (Budget) -> Unit = {}
+) {
+    var category by remember { mutableStateOf(budget?.category ?: "") }
+    var amount by remember { mutableStateOf(budget?.total?.toString() ?: "") }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    if (budget == null) {
+        onBackClick()
+        return
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Budget") },
+            text = { Text("Are you sure you want to delete the ${budget.category} budget? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onBudgetDeleted(budget)
+                        showDeleteDialog = false
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = ErrorRed)
+                ) {
+                    Text("DELETE")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("CANCEL")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -700,6 +941,11 @@ fun EditBudgetScreen(onBackClick: () -> Unit = {}) {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
+                },
+                actions = {
+                    IconButton(onClick = { showDeleteDialog = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Budget", tint = ErrorRed)
+                    }
                 }
             )
         }
@@ -708,11 +954,134 @@ fun EditBudgetScreen(onBackClick: () -> Unit = {}) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(LightGrayBackground),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .background(LightGrayBackground)
+                .padding(16.dp)
         ) {
-            Text("Edit Budget Screen - Coming Soon")
+            Card(
+                backgroundColor = Color.White,
+                shape = RoundedCornerShape(12.dp),
+                elevation = 4.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "Edit Budget",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black,
+                        modifier = Modifier.padding(bottom = 24.dp)
+                    )
+
+                    // Current Spending
+                    Text(
+                        text = "Current Spending: MWK ${"%,.2f".format(budget.spent)}",
+                        fontSize = 14.sp,
+                        color = DarkerGrayText,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
+                    // Error Message
+                    errorMessage?.let { message ->
+                        Text(
+                            text = message,
+                            color = ErrorRed,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+                    }
+
+                    // Category Input
+                    OutlinedTextField(
+                        value = category,
+                        onValueChange = {
+                            category = it
+                            errorMessage = null
+                        },
+                        label = { Text("Category") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        singleLine = true,
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            focusedBorderColor = YellowPrimary,
+                            focusedLabelColor = YellowPrimary
+                        )
+                    )
+
+                    // Amount Input
+                    OutlinedTextField(
+                        value = amount,
+                        onValueChange = {
+                            amount = it
+                            errorMessage = null
+                        },
+                        label = { Text("Budget Amount") },
+                        placeholder = { Text("Enter amount in MWK") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 24.dp),
+                        singleLine = true,
+                        leadingIcon = {
+                            Text("MWK", modifier = Modifier.padding(end = 8.dp))
+                        },
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            focusedBorderColor = YellowPrimary,
+                            focusedLabelColor = YellowPrimary
+                        )
+                    )
+
+                    // Update Button
+                    Button(
+                        onClick = {
+                            if (category.isBlank()) {
+                                errorMessage = "Please enter a category"
+                            } else if (amount.isBlank() || amount.toDoubleOrNull() == null) {
+                                errorMessage = "Please enter a valid amount"
+                            } else if (amount.toDouble() <= 0) {
+                                errorMessage = "Amount must be greater than 0"
+                            } else if (amount.toDouble() < budget.spent) {
+                                errorMessage = "New budget amount cannot be less than current spending"
+                            } else {
+                                isLoading = true
+                                val updatedBudget = budget.copy(
+                                    category = category,
+                                    total = amount.toDouble()
+                                )
+                                onBudgetUpdated(updatedBudget)
+                                isLoading = false
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = YellowPrimary,
+                            contentColor = Color.Black
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        enabled = !isLoading
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = "Update Budget",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -728,4 +1097,21 @@ fun PreviewBudgetScreen() {
 @Composable
 fun PreviewAddBudgetScreen() {
     AddBudgetScreen(userBalance = 1500.0)
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PreviewBudgetItemCard() {
+    val sampleBudget = Budget(
+        category = "Groceries",
+        icon = Icons.Default.ShoppingCart,
+        spent = 750.0,
+        total = 1000.0,
+        color = Color(0xFF4CAF50)
+    )
+    BudgetItemCard(
+        budget = sampleBudget,
+        onClick = {},
+        onDelete = {}
+    )
 }

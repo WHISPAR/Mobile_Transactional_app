@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable // Add this import
 import com.example.regen.managers.UserManager
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -32,6 +33,7 @@ private val YellowCard = Color(0xFFFFEB3B)
 private val LightGrayBackground = Color(0xFFF5F5F5)
 private val SuccessGreen = Color(0xFF4CAF50)
 private val ErrorRed = Color(0xFFF44336)
+private val WarningOrange = Color(0xFFFF9800)
 
 // ---------- WALLET SCREEN ----------
 @Composable
@@ -96,11 +98,25 @@ fun MainWalletScreen(
 ) {
     var recentTransactions by remember { mutableStateOf<List<UserManager.Transaction>>(emptyList()) }
     val userId = UserManager.getCurrentUserId()
+    val coroutineScope = rememberCoroutineScope()
 
     // Load recent transactions
     LaunchedEffect(userId) {
         if (userId != null) {
             recentTransactions = UserManager.getRecentTransactions(userId, 5)
+        }
+    }
+
+    // Function to refresh wallet data
+    fun refreshWalletData() {
+        coroutineScope.launch {
+            if (userId != null) {
+                val userData = UserManager.getUserData(userId)
+                userData?.let {
+                    onBalanceUpdate(it.balance)
+                }
+                recentTransactions = UserManager.getRecentTransactions(userId, 5)
+            }
         }
     }
 
@@ -116,6 +132,11 @@ fun MainWalletScreen(
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { refreshWalletData() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
                 }
             )
@@ -162,6 +183,28 @@ fun MainWalletScreen(
                         fontWeight = FontWeight.Normal,
                         color = Color.Black
                     )
+
+                    // Low balance warning
+                    if (userBalance < 100) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = "Low Balance",
+                                tint = WarningOrange,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Low balance - Consider depositing funds",
+                                fontSize = 12.sp,
+                                color = WarningOrange,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                 }
             }
 
@@ -191,13 +234,25 @@ fun MainWalletScreen(
                         .fillMaxWidth()
                         .padding(16.dp)
                 ) {
-                    Text(
-                        text = "Recent Transactions",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Recent Transactions",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                        Text(
+                            text = "Last 5",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     if (recentTransactions.isEmpty()) {
                         Column(
@@ -218,6 +273,13 @@ fun MainWalletScreen(
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Normal,
                                 color = Color.Gray
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Your transaction history will appear here",
+                                fontSize = 12.sp,
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center
                             )
                         }
                     } else {
@@ -333,7 +395,12 @@ fun WalletSendScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 16.dp),
-                        singleLine = true
+                        singleLine = true,
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            focusedBorderColor = YellowPrimary,
+                            focusedLabelColor = YellowPrimary
+                        ),
+                        isError = errorMessage != null
                     )
 
                     // Amount Input
@@ -352,8 +419,39 @@ fun WalletSendScreen(
                         singleLine = true,
                         leadingIcon = {
                             Text("MWK", modifier = Modifier.padding(end = 8.dp))
-                        }
+                        },
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            focusedBorderColor = YellowPrimary,
+                            focusedLabelColor = YellowPrimary
+                        ),
+                        isError = errorMessage != null
                     )
+
+                    // Budget Check Warning
+                    if (amount.isNotBlank() && amount.toDoubleOrNull() != null) {
+                        val amountValue = amount.toDouble()
+                        LaunchedEffect(amountValue) {
+                            if (userId != null && amountValue > 0) {
+                                // Auto-detect category for budget checking
+                                val category = UserManager.detectTransactionCategory(
+                                    description = "Send to $personNumber",
+                                    recipient = personNumber
+                                )
+
+                                val canSpend = UserManager.canSpendInCategory(
+                                    userId = userId,
+                                    category = category,
+                                    amount = amountValue
+                                )
+
+                                if (!canSpend) {
+                                    errorMessage = "This transaction would exceed your $category budget"
+                                } else if (errorMessage?.contains("budget") == true) {
+                                    errorMessage = null
+                                }
+                            }
+                        }
+                    }
 
                     // Send Button
                     Button(
@@ -373,19 +471,47 @@ fun WalletSendScreen(
                                     } else if (amountValue > currentBalance) {
                                         errorMessage = "Insufficient balance"
                                     } else {
-                                        // Update balance
+                                        // Auto-detect category for budget enforcement
+                                        val category = UserManager.detectTransactionCategory(
+                                            description = "Send to $personNumber",
+                                            recipient = personNumber
+                                        )
+
+                                        // Check budget constraints
+                                        val canSpend = UserManager.canSpendInCategory(
+                                            userId = userId,
+                                            category = category,
+                                            amount = amountValue
+                                        )
+
+                                        if (!canSpend) {
+                                            errorMessage = "This transaction would exceed your $category budget"
+                                            isLoading = false
+                                            return@launch
+                                        }
+
+                                        // Update balance in Firestore
                                         val newBalance = currentBalance - amountValue
                                         val success = UserManager.updateUserBalance(userId, newBalance)
 
                                         if (success) {
-                                            // Add transaction
+                                            // Add transaction to Firestore
                                             val transaction = UserManager.Transaction(
                                                 description = "Send to $personNumber",
                                                 amount = amountValue,
                                                 timestamp = Date(),
-                                                type = "send"
+                                                type = "send",
+                                                category = category,
+                                                status = "completed"
                                             )
                                             UserManager.addTransaction(userId, transaction)
+
+                                            // Update budget spending
+                                            UserManager.updateBudgetSpendingForTransaction(
+                                                userId = userId,
+                                                category = category,
+                                                amount = amountValue
+                                            )
 
                                             onBalanceUpdate(newBalance)
                                             onBackClick()
@@ -395,6 +521,9 @@ fun WalletSendScreen(
                                     }
                                     isLoading = false
                                 }
+                            } else {
+                                errorMessage = "User not authenticated"
+                                isLoading = false
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
@@ -405,7 +534,7 @@ fun WalletSendScreen(
                             .fillMaxWidth()
                             .height(50.dp),
                         shape = RoundedCornerShape(10.dp),
-                        enabled = personNumber.isNotBlank() && amount.isNotBlank() && !isLoading
+                        enabled = personNumber.isNotBlank() && amount.isNotBlank() && !isLoading && errorMessage == null
                     ) {
                         if (isLoading) {
                             CircularProgressIndicator(
@@ -431,12 +560,19 @@ fun WalletSendScreen(
 @Composable
 fun WalletReceiveScreen(onBackClick: () -> Unit = {}) {
     val context = LocalContext.current
-    var userPhoneNumber by remember { mutableStateOf("265 991 034 749") }
+    var userPhoneNumber by remember { mutableStateOf("Loading...") }
+    var userId by remember { mutableStateOf<String?>(null) }
 
-    // Load user phone number
+    // Load user data
     LaunchedEffect(Unit) {
-        // In a real app, you would get this from user profile or authentication
-        userPhoneNumber = "265 991 034 749" // Placeholder
+        userId = UserManager.getCurrentUserId()
+        if (userId != null) {
+            val userData = UserManager.getUserData(userId!!)
+            userData?.let {
+                // Use the phone property from UserData
+                userPhoneNumber = it.phone.ifEmpty { "265 991 034 749" } // Fallback to placeholder
+            }
+        }
     }
 
     Scaffold(
@@ -479,14 +615,31 @@ fun WalletReceiveScreen(onBackClick: () -> Unit = {}) {
                         .padding(32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(
-                        Icons.Filled.QrCode,
-                        contentDescription = "Receive Money",
-                        modifier = Modifier.size(80.dp),
-                        tint = YellowPrimary
-                    )
+                    // QR Code Placeholder
+                    Box(
+                        modifier = Modifier
+                            .size(200.dp)
+                            .background(LightGrayBackground, RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Filled.QrCode,
+                                contentDescription = "QR Code",
+                                modifier = Modifier.size(80.dp),
+                                tint = YellowPrimary
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Scan to Pay",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.Gray
+                            )
+                        }
+                    }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(32.dp))
 
                     Text(
                         text = "Your Personal Number",
@@ -504,6 +657,7 @@ fun WalletReceiveScreen(onBackClick: () -> Unit = {}) {
                         modifier = Modifier.padding(bottom = 24.dp)
                     )
 
+                    // Share Button
                     Button(
                         onClick = {
                             // TODO: Implement share functionality
@@ -523,6 +677,27 @@ fun WalletReceiveScreen(onBackClick: () -> Unit = {}) {
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
+
+                    // Copy Button
+                    OutlinedButton(
+                        onClick = {
+                            // TODO: Implement copy to clipboard
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            backgroundColor = Color.Transparent,
+                            contentColor = YellowPrimary
+                        ),
+                        border = ButtonDefaults.outlinedBorder.copy(color = YellowPrimary)
+                    ) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Copy Number")
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
 
                     Text(
                         text = "Share this number with others to receive money instantly",
@@ -631,7 +806,12 @@ fun WalletDepositScreen(
                         singleLine = true,
                         leadingIcon = {
                             Text("MWK", modifier = Modifier.padding(end = 8.dp))
-                        }
+                        },
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
+                            focusedBorderColor = YellowPrimary,
+                            focusedLabelColor = YellowPrimary
+                        ),
+                        isError = errorMessage != null
                     )
 
                     // Deposit Methods
@@ -675,33 +855,44 @@ fun WalletDepositScreen(
                                     val amountValue = amount.toDoubleOrNull() ?: 0.0
 
                                     // Validation
-                                    if (amountValue <= 0) {
+                                    if (amount.isBlank()) {
+                                        errorMessage = "Please enter amount"
+                                    } else if (amountValue <= 0) {
                                         errorMessage = "Please enter a valid amount"
                                     } else if (selectedMethod.isEmpty()) {
                                         errorMessage = "Please select a deposit method"
                                     } else {
-                                        // Update balance
-                                        val newBalance = currentBalance + amountValue
-                                        val success = UserManager.updateUserBalance(userId, newBalance)
+                                        // Create pending deposit for real money processing
+                                        val depositReference = UserManager.generateDepositReference(userId)
+                                        val pendingDeposit = UserManager.PendingDeposit(
+                                            userId = userId,
+                                            amount = amountValue,
+                                            method = selectedMethod,
+                                            reference = depositReference
+                                        )
 
-                                        if (success) {
-                                            // Add transaction
-                                            val transaction = UserManager.Transaction(
-                                                description = "Deposit via $selectedMethod",
-                                                amount = amountValue,
-                                                timestamp = Date(),
-                                                type = "deposit"
-                                            )
-                                            UserManager.addTransaction(userId, transaction)
+                                        val depositCreated = UserManager.createPendingDeposit(pendingDeposit)
 
-                                            onBalanceUpdate(newBalance)
-                                            onBackClick()
+                                        if (depositCreated) {
+                                            // For demo purposes, immediately complete the deposit
+                                            // In real app, this would wait for payment confirmation
+                                            val depositCompleted = UserManager.completeDeposit(pendingDeposit.id)
+
+                                            if (depositCompleted) {
+                                                onBalanceUpdate(currentBalance + amountValue)
+                                                onBackClick()
+                                            } else {
+                                                errorMessage = "Deposit processing failed. Please try again."
+                                            }
                                         } else {
-                                            errorMessage = "Deposit failed. Please try again."
+                                            errorMessage = "Failed to create deposit request. Please try again."
                                         }
                                     }
                                     isLoading = false
                                 }
+                            } else {
+                                errorMessage = "User not authenticated"
+                                isLoading = false
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
@@ -728,6 +919,17 @@ fun WalletDepositScreen(
                             )
                         }
                     }
+
+                    // Deposit Reference (if created)
+                    if (amount.isNotBlank() && selectedMethod.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Reference: ${UserManager.generateDepositReference(userId ?: "")}",
+                            fontSize = 12.sp,
+                            color = Color.Gray,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                        )
+                    }
                 }
             }
         }
@@ -742,12 +944,13 @@ fun WalletDepositMethodItem(
     onClick: () -> Unit
 ) {
     Card(
-        backgroundColor = LightGrayBackground,
+        backgroundColor = if (selected) YellowPrimary.copy(alpha = 0.1f) else LightGrayBackground,
         shape = RoundedCornerShape(8.dp),
-        elevation = 2.dp,
+        elevation = if (selected) 4.dp else 2.dp,
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp)
+            .clickable(onClick = onClick) // Fixed: clickable modifier now available
     ) {
         Row(
             modifier = Modifier
@@ -755,6 +958,21 @@ fun WalletDepositMethodItem(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Method Icon
+            Icon(
+                when (title) {
+                    "Mobile Money" -> Icons.Filled.PhoneAndroid
+                    "Bank Transfer" -> Icons.Filled.AccountBalance
+                    "Cash Agent" -> Icons.Filled.Person
+                    else -> Icons.Filled.Payment
+                },
+                contentDescription = title,
+                tint = if (selected) YellowPrimary else Color.Gray,
+                modifier = Modifier.size(24.dp)
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
             Column(
                 modifier = Modifier.weight(1f)
             ) {
@@ -771,11 +989,13 @@ fun WalletDepositMethodItem(
                     color = Color.Gray
                 )
             }
+
             RadioButton(
                 selected = selected,
                 onClick = onClick,
                 colors = RadioButtonDefaults.colors(
-                    selectedColor = YellowPrimary
+                    selectedColor = YellowPrimary,
+                    unselectedColor = Color.Gray
                 )
             )
         }
@@ -800,9 +1020,9 @@ fun WalletTransactionItem(transaction: UserManager.Transaction) {
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Icon
+        // Icon with status color
         Card(
-            backgroundColor = YellowPrimary,
+            backgroundColor = if (isIncome) SuccessGreen.copy(alpha = 0.1f) else ErrorRed.copy(alpha = 0.1f),
             shape = RoundedCornerShape(8.dp),
             elevation = 2.dp,
             modifier = Modifier.size(40.dp)
@@ -814,7 +1034,7 @@ fun WalletTransactionItem(transaction: UserManager.Transaction) {
                 Icon(
                     icon,
                     contentDescription = transaction.type,
-                    tint = Color.Black,
+                    tint = if (isIncome) SuccessGreen else ErrorRed,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -838,44 +1058,70 @@ fun WalletTransactionItem(transaction: UserManager.Transaction) {
                 fontWeight = FontWeight.Normal,
                 color = Color.Gray
             )
+            if (transaction.category.isNotEmpty()) {
+                Text(
+                    text = "Category: ${transaction.category.replaceFirstChar { it.uppercase() }}",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.Gray
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))
 
         // Amount
-        Text(
-            text = "$amountPrefix MWK ${String.format("%.2f", transaction.amount)}",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = amountColor
-        )
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = "$amountPrefix MWK ${String.format("%.2f", transaction.amount)}",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = amountColor
+            )
+            if (transaction.status.isNotEmpty() && transaction.status != "completed") {
+                Text(
+                    text = transaction.status.replaceFirstChar { it.uppercase() },
+                    fontSize = 10.sp,
+                    color = when (transaction.status) {
+                        "pending" -> WarningOrange
+                        "failed" -> ErrorRed
+                        else -> Color.Gray
+                    },
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
     }
 }
 
 @Composable
 fun RowScope.WalletActionButton(text: String, icon: ImageVector, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(
-            backgroundColor = YellowPrimary,
-            contentColor = Color.Black
-        ),
-        shape = RoundedCornerShape(10.dp),
+    Card(
         modifier = Modifier
             .weight(1f)
-            .height(60.dp)
+            .height(80.dp)
+            .clickable(onClick = onClick), // Fixed: clickable modifier now available
+        shape = RoundedCornerShape(10.dp),
+        elevation = 2.dp,
+        backgroundColor = Color.White
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.fillMaxSize()
         ) {
-            Icon(icon, contentDescription = text, modifier = Modifier.size(20.dp))
+            Icon(
+                icon,
+                contentDescription = text,
+                modifier = Modifier.size(24.dp),
+                tint = YellowPrimary
+            )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = text,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                color = Color.Black
             )
         }
     }

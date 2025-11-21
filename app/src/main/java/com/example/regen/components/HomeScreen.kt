@@ -21,7 +21,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.regen.managers.UserManager
-import com.example.regen.managers.PaymentManager
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -30,9 +29,9 @@ import java.util.*
 private val YellowPrimary = Color(0xFFFFC107)
 private val YellowCard = Color(0xFFFFEB3B)
 private val LightGrayBackground = Color(0xFFF5F5F5)
-private val ErrorRed = Color(0xFFF44336) // Added for error messages
+private val ErrorRed = Color(0xFFF44336)
 
-// ---------- MAIN SCREEN -----THE FRONT PAGE-----
+// ---------- MAIN SCREEN ----------
 @Composable
 fun HomeScreen(
     onWalletClick: () -> Unit = {},
@@ -56,16 +55,14 @@ fun HomeScreen(
         if (userId != null) {
             // Try to get user data from Firestore
             val userData = UserManager.getUserData(userId!!)
-            userData?.let {
-                userName = it.name.ifEmpty { "User" }
-                userBalance = it.balance
+            if (userData != null) {
+                userName = userData.name.ifEmpty { "User" }
+                userBalance = userData.balance
 
                 // Save to local storage
-                UserManager.saveUserDataLocally(context, userId!!, it.name, it.email)
-            }
-
-            // Fallback to local data if Firestore fails
-            if (userName == "Loading...") {
+                UserManager.saveUserDataLocally(context, userId!!, userData.name, userData.email)
+            } else {
+                // Fallback to local data if Firestore fails
                 UserManager.getLocalUserName(context).collect { localName ->
                     localName?.let {
                         userName = it
@@ -138,11 +135,26 @@ fun MainHomeScreen(
 ) {
     var recentTransactions by remember { mutableStateOf<List<UserManager.Transaction>>(emptyList()) }
     val userId = UserManager.getCurrentUserId()
+    val coroutineScope = rememberCoroutineScope()
 
     // Load recent transactions
     LaunchedEffect(userId) {
         if (userId != null) {
-            recentTransactions = UserManager.getRecentTransactions(userId, 3) // Get last 3 transactions
+            recentTransactions = UserManager.getRecentTransactions(userId, 3)
+        }
+    }
+
+    // Function to refresh user data
+    fun refreshUserData() {
+        coroutineScope.launch {
+            if (userId != null) {
+                val userData = UserManager.getUserData(userId)
+                userData?.let {
+                    // Update the state variables
+                    // Note: In a real app, you might want to use a state holder or ViewModel
+                    // For now, we'll rely on the parent to handle state updates
+                }
+            }
         }
     }
 
@@ -156,6 +168,9 @@ fun MainHomeScreen(
                 actions = {
                     IconButton(onClick = onNotificationsClick) {
                         Icon(Icons.Filled.Notifications, contentDescription = "Notifications")
+                    }
+                    IconButton(onClick = { refreshUserData() }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                     }
                 }
             )
@@ -310,7 +325,7 @@ fun MainHomeScreen(
 @Composable
 fun TransactionItem(transaction: UserManager.Transaction) {
     val isIncome = transaction.type == "deposit"
-    val amountColor = if (isIncome) Color(0xFF388E3C) else Color(0xFFD32F2F) // Green for income, red for expense
+    val amountColor = if (isIncome) Color(0xFF388E3C) else Color(0xFFD32F2F)
     val amountPrefix = if (isIncome) "+" else "-"
     val icon = when (transaction.type) {
         "deposit" -> Icons.Filled.AccountBalanceWallet
@@ -365,6 +380,14 @@ fun TransactionItem(transaction: UserManager.Transaction) {
                 fontWeight = FontWeight.Normal,
                 color = Color.Black.copy(alpha = 0.6f)
             )
+            if (transaction.category.isNotEmpty()) {
+                Text(
+                    text = "Category: ${transaction.category}",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = Color.Black.copy(alpha = 0.5f)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))
@@ -379,12 +402,6 @@ fun TransactionItem(transaction: UserManager.Transaction) {
     }
 }
 
-// ---------- DATE FORMATTER ----------
-private fun formatTransactionDate(date: Date): String {
-    val formatter = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
-    return formatter.format(date)
-}
-
 // ---------- HOME SEND SCREEN ----------
 @Composable
 fun HomeSendScreen(
@@ -396,7 +413,7 @@ fun HomeSendScreen(
     var personNumber by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) } // Added error message
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -469,7 +486,7 @@ fun HomeSendScreen(
                         value = personNumber,
                         onValueChange = {
                             personNumber = it
-                            errorMessage = null // Clear error when user types
+                            errorMessage = null
                         },
                         label = { Text("Person Number") },
                         placeholder = { Text("Enter recipient's number") },
@@ -486,7 +503,7 @@ fun HomeSendScreen(
                         value = amount,
                         onValueChange = {
                             amount = it
-                            errorMessage = null // Clear error when user types
+                            errorMessage = null
                         },
                         label = { Text("Amount") },
                         placeholder = { Text("Enter amount in MWK") },
@@ -521,19 +538,47 @@ fun HomeSendScreen(
                                     } else if (amountValue > currentBalance) {
                                         errorMessage = "Insufficient balance"
                                     } else {
-                                        // Update balance
+                                        // Auto-detect category
+                                        val category = UserManager.detectTransactionCategory(
+                                            description = "Send to $personNumber",
+                                            recipient = personNumber
+                                        )
+
+                                        // Check budget constraints
+                                        val canSpend = UserManager.canSpendInCategory(
+                                            userId = userId,
+                                            category = category,
+                                            amount = amountValue
+                                        )
+
+                                        if (!canSpend) {
+                                            errorMessage = "This transaction would exceed your $category budget"
+                                            isLoading = false
+                                            return@launch
+                                        }
+
+                                        // Update balance in Firestore
                                         val newBalance = currentBalance - amountValue
                                         val success = UserManager.updateUserBalance(userId, newBalance)
 
                                         if (success) {
-                                            // Add transaction
+                                            // Add transaction to Firestore
                                             val transaction = UserManager.Transaction(
                                                 description = "Send money to $personNumber",
                                                 amount = amountValue,
-                                                timestamp = java.util.Date(),
-                                                type = "send"
+                                                timestamp = Date(),
+                                                type = "send",
+                                                category = category,
+                                                status = "completed"
                                             )
                                             UserManager.addTransaction(userId, transaction)
+
+                                            // Update budget spending
+                                            UserManager.updateBudgetSpendingForTransaction(
+                                                userId = userId,
+                                                category = category,
+                                                amount = amountValue
+                                            )
 
                                             onBalanceUpdate(newBalance)
                                             onBackClick()
@@ -543,6 +588,9 @@ fun HomeSendScreen(
                                     }
                                     isLoading = false
                                 }
+                            } else {
+                                errorMessage = "User not authenticated"
+                                isLoading = false
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
@@ -586,7 +634,7 @@ fun HomeDepositScreen(
     var amount by remember { mutableStateOf("") }
     var selectedMethod by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) } // Added error message
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -659,7 +707,7 @@ fun HomeDepositScreen(
                         value = amount,
                         onValueChange = {
                             amount = it
-                            errorMessage = null // Clear error when user types
+                            errorMessage = null
                         },
                         label = { Text("Deposit Amount") },
                         placeholder = { Text("Enter amount in MWK") },
@@ -683,7 +731,6 @@ fun HomeDepositScreen(
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
 
-                    // FIXED: Now with proper selection handling
                     HomeDepositMethodItem(
                         title = "Mobile Money",
                         description = "Add funds via Airtel Money or TNM Mpamba",
@@ -723,28 +770,37 @@ fun HomeDepositScreen(
                                     } else if (selectedMethod.isEmpty()) {
                                         errorMessage = "Please select a deposit method"
                                     } else {
-                                        // Update balance
-                                        val newBalance = currentBalance + amountValue
-                                        val success = UserManager.updateUserBalance(userId, newBalance)
+                                        // Create pending deposit for real money processing
+                                        val depositReference = UserManager.generateDepositReference(userId)
+                                        val pendingDeposit = UserManager.PendingDeposit(
+                                            userId = userId,
+                                            amount = amountValue,
+                                            method = selectedMethod,
+                                            reference = depositReference
+                                        )
 
-                                        if (success) {
-                                            // Add transaction
-                                            val transaction = UserManager.Transaction(
-                                                description = "Deposit via $selectedMethod",
-                                                amount = amountValue,
-                                                timestamp = java.util.Date(),
-                                                type = "deposit"
-                                            )
-                                            UserManager.addTransaction(userId, transaction)
+                                        val depositCreated = UserManager.createPendingDeposit(pendingDeposit)
 
-                                            onBalanceUpdate(newBalance)
-                                            onBackClick()
+                                        if (depositCreated) {
+                                            // For demo purposes, immediately complete the deposit
+                                            // In real app, this would wait for payment confirmation
+                                            val depositCompleted = UserManager.completeDeposit(pendingDeposit.id)
+
+                                            if (depositCompleted) {
+                                                onBalanceUpdate(currentBalance + amountValue)
+                                                onBackClick()
+                                            } else {
+                                                errorMessage = "Deposit processing failed. Please try again."
+                                            }
                                         } else {
-                                            errorMessage = "Deposit failed. Please try again."
+                                            errorMessage = "Failed to create deposit request. Please try again."
                                         }
                                     }
                                     isLoading = false
                                 }
+                            } else {
+                                errorMessage = "User not authenticated"
+                                isLoading = false
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
@@ -788,7 +844,7 @@ fun HomeWithdrawScreen(
     var amount by remember { mutableStateOf("") }
     var selectedMethod by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) } // Added error message
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -861,7 +917,7 @@ fun HomeWithdrawScreen(
                         value = amount,
                         onValueChange = {
                             amount = it
-                            errorMessage = null // Clear error when user types
+                            errorMessage = null
                         },
                         label = { Text("Withdrawal Amount") },
                         placeholder = { Text("Enter amount in MWK") },
@@ -926,17 +982,19 @@ fun HomeWithdrawScreen(
                                     } else if (selectedMethod.isEmpty()) {
                                         errorMessage = "Please select a withdrawal method"
                                     } else {
-                                        // Update balance
+                                        // Update balance in Firestore
                                         val newBalance = currentBalance - amountValue
                                         val success = UserManager.updateUserBalance(userId, newBalance)
 
                                         if (success) {
-                                            // Add transaction
+                                            // Add transaction to Firestore
                                             val transaction = UserManager.Transaction(
                                                 description = "Withdrawal via $selectedMethod",
                                                 amount = amountValue,
-                                                timestamp = java.util.Date(),
-                                                type = "withdrawal"
+                                                timestamp = Date(),
+                                                type = "withdrawal",
+                                                category = "withdrawal",
+                                                status = "completed"
                                             )
                                             UserManager.addTransaction(userId, transaction)
 
@@ -948,6 +1006,9 @@ fun HomeWithdrawScreen(
                                     }
                                     isLoading = false
                                 }
+                            } else {
+                                errorMessage = "User not authenticated"
+                                isLoading = false
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
@@ -986,6 +1047,19 @@ fun HomeReportsScreen(
     userId: String?,
     onBackClick: () -> Unit = {}
 ) {
+    var monthlySpending by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(userId) {
+        if (userId != null) {
+            val calendar = Calendar.getInstance()
+            val month = calendar.get(Calendar.MONTH)
+            val year = calendar.get(Calendar.YEAR)
+
+            monthlySpending = UserManager.getMonthlySpending(userId, month, year)
+        }
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -1030,6 +1104,26 @@ fun HomeReportsScreen(
                         color = Color.Black,
                         modifier = Modifier.padding(bottom = 24.dp)
                     )
+
+                    // Monthly Spending Summary
+                    if (monthlySpending.isNotEmpty()) {
+                        Text(
+                            text = "Monthly Spending by Category",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+
+                        monthlySpending.forEach { (category, amount) ->
+                            HomeReportItem(
+                                title = category,
+                                description = "MWK ${String.format("%.2f", amount)}"
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
 
                     HomeReportItem("Transaction History", "View all your transactions")
                     HomeReportItem("Spending Analytics", "Analyze your spending patterns")
@@ -1160,7 +1254,7 @@ fun RowScope.GridButton(text: String, icon: ImageVector, onClick: () -> Unit = {
     }
 }
 
-// ---------- HOME DEPOSIT METHOD ITEM (FIXED) ----------
+// ---------- HOME DEPOSIT METHOD ITEM ----------
 @Composable
 fun HomeDepositMethodItem(
     title: String,
@@ -1300,7 +1394,13 @@ fun HomeReportItem(title: String, description: String) {
     }
 }
 
-// ---------- PREVIEW ----------
+// ---------- DATE FORMATTER ----------
+private fun formatTransactionDate(date: Date): String {
+    val formatter = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+    return formatter.format(date)
+}
+
+// ---------- PREVIEWS ----------
 @Preview(showBackground = true)
 @Composable
 fun PreviewHomeScreen() {
@@ -1338,7 +1438,8 @@ fun PreviewTransactionItem() {
         description = "Mobile money deposit",
         amount = 1500.0,
         timestamp = Date(),
-        type = "deposit"
+        type = "deposit",
+        category = "deposit"
     )
     TransactionItem(transaction = transaction)
 }

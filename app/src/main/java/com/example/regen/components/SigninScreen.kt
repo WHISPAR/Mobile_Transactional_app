@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Phone // Add this import
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,7 @@ fun SigninScreen(
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
+    var phoneNumber by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
@@ -84,23 +86,43 @@ fun SigninScreen(
                 val result = if (isSignIn) {
                     AuthService.signIn(email, password)
                 } else {
-                    AuthService.signUp(name, email, password)
+                    AuthService.signUp(name, email, password, phoneNumber)
                 }
 
                 if (result.isSuccess) {
                     val userId = AuthService.getCurrentUserId()
                     if (userId != null) {
-                        val userName = if (isSignIn) {
-                            // For sign in, try to get name from Firestore, fallback to email
+                        if (isSignIn) {
+                            // For sign in, get user data from Firestore
                             val userData = UserManager.getUserData(userId)
-                            userData?.name ?: email.substringBefore("@")
+                            if (userData != null) {
+                                val userName = userData.name.ifEmpty { email.substringBefore("@") }
+                                // Save user data locally
+                                UserManager.saveUserDataLocally(context, userId, userName, email)
+                                onSignInSuccess(userName)
+                            } else {
+                                // If no user data in Firestore, create it
+                                val success = UserManager.createUserInFirestore(
+                                    userId = userId,
+                                    name = email.substringBefore("@"),
+                                    email = email,
+                                    phoneNumber = ""
+                                )
+                                if (success) {
+                                    UserManager.saveUserDataLocally(context, userId, email.substringBefore("@"), email)
+                                    onSignInSuccess(email.substringBefore("@"))
+                                } else {
+                                    errorMessage = "Failed to create user profile"
+                                }
+                            }
                         } else {
-                            name
+                            // For sign up, user data is created in AuthService.signUp
+                            // Just verify and proceed
+                            val userData = UserManager.getUserData(userId)
+                            val userName = userData?.name ?: name
+                            UserManager.saveUserDataLocally(context, userId, userName, email)
+                            onSignInSuccess(userName)
                         }
-
-                        // Save user data locally
-                        UserManager.saveUserDataLocally(context, userId, userName, email)
-                        onSignInSuccess(userName)
                     } else {
                         errorMessage = "User authentication failed"
                     }
@@ -171,6 +193,32 @@ fun SigninScreen(
                         .fillMaxWidth()
                         .padding(bottom = 16.dp),
                     singleLine = true,
+                    colors = TextFieldDefaults.outlinedTextFieldColors(
+                        textColor = Color.Black,
+                        cursorColor = YellowPrimary,
+                        focusedBorderColor = YellowPrimary,
+                        focusedLabelColor = YellowPrimary
+                    )
+                )
+            }
+
+            // Phone Number Field (only for sign up)
+            if (!isSignIn) {
+                OutlinedTextField(
+                    value = phoneNumber,
+                    onValueChange = {
+                        phoneNumber = it
+                        errorMessage = null
+                    },
+                    label = { Text("Phone Number", color = DarkerGrayText) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Phone, contentDescription = "Phone", tint = DarkerGrayText) // Now this will work
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     colors = TextFieldDefaults.outlinedTextFieldColors(
                         textColor = Color.Black,
                         cursorColor = YellowPrimary,

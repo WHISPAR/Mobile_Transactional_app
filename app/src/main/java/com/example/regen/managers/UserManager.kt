@@ -1,472 +1,518 @@
 package com.example.regen.managers
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
-import com.google.firebase.auth.FirebaseAuth
+import android.os.Parcelable
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.tasks.await
 import java.util.*
 
-// DataStore for local caching
-val Context.dataStore by preferencesDataStore(name = "user_preferences")
-
 object UserManager {
-    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
-    private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
+    private val db = FirebaseFirestore.getInstance()
 
-    // DataStore keys
-    private val USER_ID_KEY = stringPreferencesKey("user_id")
-    private val USER_NAME_KEY = stringPreferencesKey("user_name")
-    private val USER_EMAIL_KEY = stringPreferencesKey("user_email")
-
-    // User data class matching your Firestore structure
     data class UserData(
+        val uid: String = "",
         val name: String = "",
         val email: String = "",
+        val phone: String = "",
         val balance: Double = 0.0,
-        val phoneNumber: String = "",
+        val currency: String = "MWK",
         val createdAt: Date = Date()
     )
 
     data class Transaction(
-        val description: String = "",
-        val amount: Double = 0.0,
-        val timestamp: Date = Date(),
-        val type: String = "", // "deposit", "withdrawal", "send"
+        val id: String = UUID.randomUUID().toString(),
+        val description: String,
+        val amount: Double,
+        val timestamp: Date,
+        val type: String, // "deposit", "withdrawal", "send"
         val category: String = "",
-        val status: String = "completed" // "pending", "completed", "failed"
+        val status: String = "completed"
     )
 
+    // Add Budget data class - Removed Parcelable implementation
     data class Budget(
         val id: String = UUID.randomUUID().toString(),
-        val category: String,
-        val iconName: String, // Store icon as string for Firestore
+        val category: String = "",
+        val iconName: String = "",
         val spent: Double = 0.0,
-        val total: Double,
-        val color: Int, // Store color as Int for Firestore
-        val createdAt: Date = Date(),
-        val userId: String = ""
+        val total: Double = 0.0,
+        val color: Int = 0, // Keep as Int for compatibility
+        val createdAt: Date = Date()
     )
 
-    // NEW: Pending deposit for real money processing
+    // Add PendingDeposit data class
     data class PendingDeposit(
         val id: String = UUID.randomUUID().toString(),
-        val userId: String,
-        val amount: Double,
-        val method: String, // "airtel", "mpamba", "bank"
-        val reference: String,
-        val status: String = "pending", // "pending", "verified", "completed", "failed"
-        val createdAt: Date = Date(),
-        val verifiedAt: Date? = null,
-        val completedAt: Date? = null
+        val userId: String = "",
+        val amount: Double = 0.0,
+        val method: String = "",
+        val reference: String = "",
+        val status: String = "pending",
+        val createdAt: Date = Date()
     )
 
-    // Save user data locally
-    suspend fun saveUserDataLocally(context: Context, userId: String, name: String, email: String) {
-        context.dataStore.edit { preferences ->
-            preferences[USER_ID_KEY] = userId
-            preferences[USER_NAME_KEY] = name
-            preferences[USER_EMAIL_KEY] = email
-        }
-    }
-
-    // Get locally stored user data
-    fun getLocalUserName(context: Context): Flow<String?> {
-        return context.dataStore.data.map { preferences ->
-            preferences[USER_NAME_KEY]
-        }
-    }
-
-    fun getLocalUserEmail(context: Context): Flow<String?> {
-        return context.dataStore.data.map { preferences ->
-            preferences[USER_EMAIL_KEY]
-        }
-    }
-
-    fun getLocalUserId(context: Context): Flow<String?> {
-        return context.dataStore.data.map { preferences ->
-            preferences[USER_ID_KEY]
-        }
-    }
-
-    // Clear local data
-    suspend fun clearLocalData(context: Context) {
-        context.dataStore.edit { preferences ->
-            preferences.clear()
-        }
-    }
-
-    // Firestore operations
-    suspend fun createUserInFirestore(userId: String, name: String, email: String, phoneNumber: String = ""): Boolean {
+    // Create user in Firestore
+    suspend fun createUserInFirestore(userId: String, name: String, email: String, phoneNumber: String): Boolean {
         return try {
             val userData = UserData(
+                uid = userId,
                 name = name,
                 email = email,
-                phoneNumber = phoneNumber,
+                phone = phoneNumber,
                 balance = 0.0,
+                currency = "MWK",
                 createdAt = Date()
             )
 
-            db.collection("users")
-                .document(userId)
-                .set(userData)
-                .await()
+            val userMap = mapOf(
+                "uid" to userId,
+                "name" to name,
+                "email" to email,
+                "phone" to phoneNumber,
+                "balance" to 0.0,
+                "currency" to "MWK",
+                "createdAt" to com.google.firebase.Timestamp(Date().time)
+            )
 
+            db.collection("users").document(userId)
+                .set(userMap)
+                .await()
             true
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
 
+    // Save user data to Firestore
+    suspend fun saveUserData(userId: String, userData: UserData): Boolean {
+        return try {
+            val userMap = mapOf(
+                "uid" to userId,
+                "name" to userData.name,
+                "email" to userData.email,
+                "phone" to userData.phone,
+                "balance" to userData.balance,
+                "currency" to userData.currency,
+                "createdAt" to com.google.firebase.Timestamp(userData.createdAt.time)
+            )
+
+            db.collection("users").document(userId)
+                .set(userMap, SetOptions.merge())
+                .await()
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    // Get user data from Firestore
     suspend fun getUserData(userId: String): UserData? {
         return try {
-            val document = db.collection("users")
-                .document(userId)
-                .get()
-                .await()
-
+            val document = db.collection("users").document(userId).get().await()
             if (document.exists()) {
-                document.toObject(UserData::class.java)
+                UserData(
+                    uid = document.getString("uid") ?: userId,
+                    name = document.getString("name") ?: "",
+                    email = document.getString("email") ?: "",
+                    phone = document.getString("phone") ?: "",
+                    balance = document.getDouble("balance") ?: 0.0,
+                    currency = document.getString("currency") ?: "MWK",
+                    createdAt = document.getTimestamp("createdAt")?.toDate() ?: Date()
+                )
             } else {
                 null
             }
         } catch (e: Exception) {
+            e.printStackTrace()
             null
         }
     }
 
+    // Update user balance in Firestore
     suspend fun updateUserBalance(userId: String, newBalance: Double): Boolean {
         return try {
-            val data = mapOf("balance" to newBalance)
-            db.collection("users")
-                .document(userId)
-                .set(data, SetOptions.merge())
+            val updates = mapOf(
+                "balance" to newBalance,
+                "lastUpdated" to com.google.firebase.Timestamp.now()
+            )
+
+            db.collection("users").document(userId)
+                .update(updates)
                 .await()
             true
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
 
+    // Add transaction to Firestore
     suspend fun addTransaction(userId: String, transaction: Transaction): Boolean {
         return try {
-            db.collection("users")
-                .document(userId)
+            val transactionMap = mapOf(
+                "id" to transaction.id,
+                "description" to transaction.description,
+                "amount" to transaction.amount,
+                "timestamp" to com.google.firebase.Timestamp(transaction.timestamp.time),
+                "type" to transaction.type,
+                "category" to transaction.category,
+                "status" to transaction.status
+            )
+
+            db.collection("users").document(userId)
                 .collection("transactions")
-                .add(transaction)
+                .document(transaction.id)
+                .set(transactionMap)
                 .await()
             true
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
 
-    suspend fun getRecentTransactions(userId: String, limit: Int): List<Transaction> {
+    // Get recent transactions from Firestore
+    suspend fun getRecentTransactions(userId: String, limit: Int = 5): List<Transaction> {
         return try {
-            val querySnapshot = db.collection("users")
-                .document(userId)
+            val querySnapshot = db.collection("users").document(userId)
                 .collection("transactions")
-                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
                 .limit(limit.toLong())
                 .get()
                 .await()
 
-            querySnapshot.documents.mapNotNull { document ->
-                document.toObject(Transaction::class.java)
+            querySnapshot.documents.map { document ->
+                Transaction(
+                    id = document.getString("id") ?: document.id,
+                    description = document.getString("description") ?: "",
+                    amount = document.getDouble("amount") ?: 0.0,
+                    timestamp = document.getTimestamp("timestamp")?.toDate() ?: Date(),
+                    type = document.getString("type") ?: "unknown",
+                    category = document.getString("category") ?: "",
+                    status = document.getString("status") ?: "completed"
+                )
             }
         } catch (e: Exception) {
-            // Return empty list if there's an error or no transactions
+            e.printStackTrace()
             emptyList()
         }
     }
 
-    suspend fun getCurrentUserBalance(userId: String): Double {
-        return try {
-            val userData = getUserData(userId)
-            userData?.balance ?: 0.0
-        } catch (e: Exception) {
-            0.0
-        }
-    }
+    // BUDGET-RELATED METHODS
 
-    // NEW: Deposit-specific functions
-    suspend fun createPendingDeposit(deposit: PendingDeposit): Boolean {
-        return try {
-            db.collection("pending_deposits")
-                .document(deposit.id)
-                .set(deposit)
-                .await()
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    suspend fun getPendingDeposits(userId: String): List<PendingDeposit> {
-        return try {
-            val querySnapshot = db.collection("pending_deposits")
-                .whereEqualTo("userId", userId)
-                .whereEqualTo("status", "pending")
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .get()
-                .await()
-
-            querySnapshot.documents.mapNotNull { document ->
-                document.toObject(PendingDeposit::class.java)
-            }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    suspend fun completeDeposit(depositId: String): Boolean {
-        return try {
-            // Get the pending deposit
-            val depositDoc = db.collection("pending_deposits").document(depositId).get().await()
-            val deposit = depositDoc.toObject(PendingDeposit::class.java)
-
-            deposit?.let { pendingDeposit ->
-                // Update user balance
-                val userData = getUserData(pendingDeposit.userId)
-                val newBalance = (userData?.balance ?: 0.0) + pendingDeposit.amount
-                val balanceUpdated = updateUserBalance(pendingDeposit.userId, newBalance)
-
-                if (balanceUpdated) {
-                    // Add transaction record
-                    val transaction = Transaction(
-                        description = "Deposit via ${pendingDeposit.method.uppercase()}",
-                        amount = pendingDeposit.amount,
-                        timestamp = Date(),
-                        type = "deposit",
-                        category = "deposit",
-                        status = "completed"
-                    )
-                    addTransaction(pendingDeposit.userId, transaction)
-
-                    // Update budget if category exists
-                    updateBudgetForDeposit(pendingDeposit.userId, pendingDeposit.amount)
-
-                    // Mark deposit as completed
-                    db.collection("pending_deposits")
-                        .document(depositId)
-                        .update(
-                            mapOf(
-                                "status" to "completed",
-                                "completedAt" to Date()
-                            )
-                        )
-                        .await()
-
-                    true
-                } else {
-                    false
-                }
-            } ?: false
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    suspend fun updateBudgetForDeposit(userId: String, amount: Double) {
-        try {
-            val budgets = getUserBudgets(userId)
-            val depositBudget = budgets.find { it.category.equals("deposit", ignoreCase = true) }
-
-            depositBudget?.let { budget ->
-                val newSpent = budget.spent + amount
-                db.collection("budgets")
-                    .document(budget.id)
-                    .update("spent", newSpent)
-                    .await()
-            }
-        } catch (e: Exception) {
-            // Silently fail - budget update is optional for deposits
-        }
-    }
-
-    // NEW: Budget enforcement functions
-    suspend fun canSpendInCategory(userId: String, category: String, amount: Double): Boolean {
-        return try {
-            val budgets = getUserBudgets(userId)
-            val categoryBudget = budgets.find { it.category.equals(category, ignoreCase = true) }
-
-            categoryBudget?.let { budget ->
-                // Check if spending this amount would exceed budget
-                (budget.spent + amount) <= budget.total
-            } ?: true // No budget for this category, allow spending
-        } catch (e: Exception) {
-            true // If there's an error, allow the transaction
-        }
-    }
-
-    suspend fun updateBudgetSpendingForTransaction(userId: String, category: String, amount: Double): Boolean {
-        return try {
-            val budgets = getUserBudgets(userId)
-            val relevantBudget = budgets.find { it.category.equals(category, ignoreCase = true) }
-
-            relevantBudget?.let { budget ->
-                val newSpent = budget.spent + amount
-                db.collection("budgets")
-                    .document(budget.id)
-                    .update("spent", newSpent)
-                    .await()
-                true
-            } ?: false
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    // NEW: Transaction category detection
-    fun detectTransactionCategory(description: String, recipient: String = ""): String {
-        val desc = description.lowercase()
-        val recip = recipient.lowercase()
-
-        return when {
-            desc.contains("restaurant") || desc.contains("dining") ||
-                    desc.contains("food") || desc.contains("cafe") ||
-                    recip.contains("restaurant") || recip.contains("dining") -> "Dining"
-
-            desc.contains("grocery") || desc.contains("supermarket") ||
-                    desc.contains("market") -> "Groceries"
-
-            desc.contains("transport") || desc.contains("bus") ||
-                    desc.contains("taxi") || desc.contains("fuel") -> "Transport"
-
-            desc.contains("movie") || desc.contains("entertainment") ||
-                    desc.contains("netflix") || desc.contains("show") -> "Entertainment"
-
-            desc.contains("utility") || desc.contains("electricity") ||
-                    desc.contains("water") || desc.contains("bill") -> "Utilities"
-
-            desc.contains("shopping") || desc.contains("mall") ||
-                    desc.contains("store") -> "Shopping"
-
-            desc.contains("deposit") -> "Deposit"
-
-            else -> "Other"
-        }
-    }
-
-    // Budget functions
+    // Save budget to Firestore
     suspend fun saveBudget(budget: Budget): Boolean {
         return try {
+            val budgetMap = mapOf(
+                "id" to budget.id,
+                "category" to budget.category,
+                "iconName" to budget.iconName,
+                "spent" to budget.spent,
+                "total" to budget.total,
+                "color" to budget.color.toLong(), // Convert Int to Long for Firestore
+                "createdAt" to com.google.firebase.Timestamp(budget.createdAt.time)
+            )
+
             val userId = getCurrentUserId()
             if (userId != null) {
-                db.collection("budgets")
+                db.collection("users").document(userId)
+                    .collection("budgets")
                     .document(budget.id)
-                    .set(budget.copy(userId = userId))
+                    .set(budgetMap)
                     .await()
                 true
             } else {
                 false
             }
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
 
+    // Get user budgets from Firestore
     suspend fun getUserBudgets(userId: String): List<Budget> {
         return try {
-            val querySnapshot = db.collection("budgets")
-                .whereEqualTo("userId", userId)
+            val querySnapshot = db.collection("users").document(userId)
+                .collection("budgets")
                 .get()
                 .await()
 
-            querySnapshot.documents.mapNotNull { document ->
-                document.toObject(Budget::class.java)
+            querySnapshot.documents.map { document ->
+                Budget(
+                    id = document.getString("id") ?: document.id,
+                    category = document.getString("category") ?: "",
+                    iconName = document.getString("iconName") ?: "",
+                    spent = document.getDouble("spent") ?: 0.0,
+                    total = document.getDouble("total") ?: 0.0,
+                    color = getColorFromDocument(document),
+                    createdAt = document.getTimestamp("createdAt")?.toDate() ?: Date()
+                )
             }
         } catch (e: Exception) {
+            e.printStackTrace()
             emptyList()
         }
     }
 
-    suspend fun updateBudgetSpending(budgetId: String, amount: Double): Boolean {
+    // Helper function to safely extract color from document
+    private fun getColorFromDocument(document: com.google.firebase.firestore.DocumentSnapshot): Int {
         return try {
-            // Update budget spending when transactions occur
-            val budgetDoc = db.collection("budgets").document(budgetId).get().await()
-            val budget = budgetDoc.toObject(Budget::class.java)
-            budget?.let {
-                val newSpent = it.spent + amount
-                db.collection("budgets")
+            // Try to get as Long first (Firestore might store numbers as Long)
+            document.getLong("color")?.toInt() ?:
+            // Fallback to Double
+            document.getDouble("color")?.toInt() ?:
+            // Final fallback
+            0
+        } catch (e: Exception) {
+            0
+        }
+    }
+
+    // Delete budget from Firestore
+    suspend fun deleteBudget(budgetId: String): Boolean {
+        return try {
+            val userId = getCurrentUserId()
+            if (userId != null) {
+                db.collection("users").document(userId)
+                    .collection("budgets")
                     .document(budgetId)
-                    .update("spent", newSpent)
+                    .delete()
                     .await()
                 true
-            } ?: false
+            } else {
+                false
+            }
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
 
-    suspend fun deleteBudget(budgetId: String): Boolean {
+    // Update budget spending
+    suspend fun updateBudgetSpending(budgetId: String, newSpentAmount: Double): Boolean {
         return try {
-            db.collection("budgets")
-                .document(budgetId)
-                .delete()
+            val userId = getCurrentUserId()
+            if (userId != null) {
+                val updates = mapOf(
+                    "spent" to newSpentAmount
+                )
+
+                db.collection("users").document(userId)
+                    .collection("budgets")
+                    .document(budgetId)
+                    .update(updates)
+                    .await()
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    // NEW METHODS FOR HOMESCREEN FUNCTIONALITY
+
+    // Detect transaction category based on description and recipient
+    fun detectTransactionCategory(description: String, recipient: String = ""): String {
+        val desc = description.lowercase()
+
+        return when {
+            desc.contains("grocery") || desc.contains("food") || desc.contains("market") -> "Groceries"
+            desc.contains("transport") || desc.contains("bus") || desc.contains("taxi") || desc.contains("fuel") -> "Transport"
+            desc.contains("utility") || desc.contains("electric") || desc.contains("water") || desc.contains("bill") -> "Utilities"
+            desc.contains("entertain") || desc.contains("movie") || desc.contains("game") -> "Entertainment"
+            desc.contains("health") || desc.contains("medical") || desc.contains("hospital") -> "Healthcare"
+            desc.contains("education") || desc.contains("school") || desc.contains("book") -> "Education"
+            desc.contains("shopping") || desc.contains("cloth") || desc.contains("store") -> "Shopping"
+            desc.contains("restaurant") || desc.contains("dining") || desc.contains("cafe") -> "Dining"
+            desc.contains("send") || desc.contains("transfer") -> "Transfer"
+            desc.contains("withdraw") -> "Withdrawal"
+            desc.contains("deposit") -> "Deposit"
+            else -> "Other"
+        }
+    }
+
+    // Check if user can spend in a category based on budget constraints
+    suspend fun canSpendInCategory(userId: String, category: String, amount: Double): Boolean {
+        return try {
+            val budgets = getUserBudgets(userId)
+            val categoryBudget = budgets.find { it.category == category }
+
+            categoryBudget?.let { budget ->
+                // Check if the new spending would exceed the budget
+                (budget.spent + amount) <= budget.total
+            } ?: true // If no budget exists for this category, allow spending
+        } catch (e: Exception) {
+            e.printStackTrace()
+            true // Allow spending if there's an error
+        }
+    }
+
+    // Update budget spending for a transaction
+    suspend fun updateBudgetSpendingForTransaction(userId: String, category: String, amount: Double): Boolean {
+        return try {
+            val budgets = getUserBudgets(userId)
+            val categoryBudget = budgets.find { it.category == category }
+
+            categoryBudget?.let { budget ->
+                val newSpentAmount = budget.spent + amount
+                updateBudgetSpending(budget.id, newSpentAmount)
+            } ?: true // If no budget exists, nothing to update
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    // Generate deposit reference
+    fun generateDepositReference(userId: String): String {
+        val timestamp = System.currentTimeMillis()
+        val random = (1000..9999).random()
+        return "DEP${userId.take(4)}${timestamp.toString().takeLast(6)}$random"
+    }
+
+    // Create pending deposit
+    suspend fun createPendingDeposit(pendingDeposit: PendingDeposit): Boolean {
+        return try {
+            val depositMap = mapOf(
+                "id" to pendingDeposit.id,
+                "userId" to pendingDeposit.userId,
+                "amount" to pendingDeposit.amount,
+                "method" to pendingDeposit.method,
+                "reference" to pendingDeposit.reference,
+                "status" to pendingDeposit.status,
+                "createdAt" to com.google.firebase.Timestamp(pendingDeposit.createdAt.time)
+            )
+
+            db.collection("pending_deposits")
+                .document(pendingDeposit.id)
+                .set(depositMap)
                 .await()
             true
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
 
-    // NEW: Financial analytics
+    // Complete deposit
+    suspend fun completeDeposit(depositId: String): Boolean {
+        return try {
+            // Get the pending deposit
+            val depositDoc = db.collection("pending_deposits").document(depositId).get().await()
+            if (!depositDoc.exists()) return false
+
+            val userId = depositDoc.getString("userId") ?: return false
+            val amount = depositDoc.getDouble("amount") ?: 0.0
+
+            // Update deposit status
+            db.collection("pending_deposits").document(depositId)
+                .update("status", "completed")
+                .await()
+
+            // Get current user balance
+            val userData = getUserData(userId)
+            val currentBalance = userData?.balance ?: 0.0
+
+            // Update user balance
+            val newBalance = currentBalance + amount
+            val balanceUpdated = updateUserBalance(userId, newBalance)
+
+            if (balanceUpdated) {
+                // Add transaction record
+                val transaction = Transaction(
+                    description = "Deposit completed",
+                    amount = amount,
+                    timestamp = Date(),
+                    type = "deposit",
+                    category = "Deposit"
+                )
+                addTransaction(userId, transaction)
+            }
+
+            balanceUpdated
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    // Get monthly spending by category
     suspend fun getMonthlySpending(userId: String, month: Int, year: Int): Map<String, Double> {
         return try {
-            val startDate = Calendar.getInstance().apply {
-                set(year, month, 1, 0, 0, 0)
-            }.time
+            val calendar = Calendar.getInstance()
+            calendar.set(year, month, 1, 0, 0, 0)
+            val startOfMonth = calendar.time
 
-            val endDate = Calendar.getInstance().apply {
-                set(year, month + 1, 1, 0, 0, 0)
-            }.time
+            calendar.add(Calendar.MONTH, 1)
+            calendar.add(Calendar.SECOND, -1)
+            val endOfMonth = calendar.time
 
-            val querySnapshot = db.collection("users")
-                .document(userId)
+            val querySnapshot = db.collection("users").document(userId)
                 .collection("transactions")
-                .whereGreaterThanOrEqualTo("timestamp", startDate)
-                .whereLessThan("timestamp", endDate)
-                .whereEqualTo("type", "send")
+                .whereGreaterThanOrEqualTo("timestamp", com.google.firebase.Timestamp(startOfMonth.time))
+                .whereLessThanOrEqualTo("timestamp", com.google.firebase.Timestamp(endOfMonth.time))
                 .get()
                 .await()
 
             val spendingByCategory = mutableMapOf<String, Double>()
 
             querySnapshot.documents.forEach { document ->
-                val transaction = document.toObject(Transaction::class.java)
-                transaction?.let {
-                    val category = it.category.ifEmpty { "Other" }
-                    spendingByCategory[category] = spendingByCategory.getOrDefault(category, 0.0) + it.amount
+                val category = document.getString("category") ?: "Other"
+                val amount = document.getDouble("amount") ?: 0.0
+                val type = document.getString("type") ?: ""
+
+                // Only count spending (withdrawals and sends), not deposits
+                if (type == "withdrawal" || type == "send") {
+                    spendingByCategory[category] = spendingByCategory.getOrDefault(category, 0.0) + amount
                 }
             }
 
             spendingByCategory
         } catch (e: Exception) {
+            e.printStackTrace()
             emptyMap()
         }
     }
 
-    // Get current authenticated user ID
+    // Get current user ID
     fun getCurrentUserId(): String? {
-        return auth.currentUser?.uid
+        // This should return the Firebase Auth current user ID
+        return try {
+            com.example.regen.services.AuthService.getCurrentUserId()
+        } catch (e: Exception) {
+            // Fallback for preview/testing
+            "test_user_id"
+        }
     }
 
-    // Check if user is authenticated
-    fun isUserAuthenticated(): Boolean {
-        return auth.currentUser != null
+    // Local storage functions
+    fun saveUserDataLocally(context: Context, userId: String, userName: String, userEmail: String) {
+        val sharedPref = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+        with(sharedPref.edit()) {
+            putString("user_id", userId)
+            putString("user_name", userName)
+            putString("user_email", userEmail)
+            apply()
+        }
     }
 
-    // NEW: Generate unique reference for deposits
-    fun generateDepositReference(userId: String): String {
-        val timestamp = System.currentTimeMillis().toString().takeLast(6)
-        val userPart = userId.takeLast(4).uppercase()
-        return "REGEN${userPart}${timestamp}"
+    fun getLocalUserName(context: Context): Flow<String?> = flow {
+        val sharedPref = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+        emit(sharedPref.getString("user_name", null))
+    }
+
+    // Add the missing method for getting local user email
+    fun getLocalUserEmail(context: Context): Flow<String?> = flow {
+        val sharedPref = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+        emit(sharedPref.getString("user_email", null))
     }
 }
